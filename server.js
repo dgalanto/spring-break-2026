@@ -17,6 +17,14 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
+
+// Temporary request logging for debugging production proxy/CORS issues
+// Can be removed after deployment verification
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'} - Host: ${req.headers.host}`);
+  next();
+});
+
 app.use(bodyParser.json({ limit: '100kb' }));
 // Allow CORS for local testing. Restrict origin in production.
 app.use(cors({ origin: true, credentials: true }));
@@ -168,6 +176,15 @@ function sanitize(str = '') {
 }
 
 // --- API Endpoints ---
+
+// Explicit OPTIONS handler for /api/* to help with preflight CORS requests
+app.options('/api/*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(204).end();
+});
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
