@@ -1,8 +1,7 @@
-
 {
   "name": "spring-break-server",
   "version": "1.0.0",
-  "description": "Small Express server to proxy Gemini and store comments (example)",
+  "description": "Small Express server to proxy Gemini and store comments (GitHub-backed example)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +11,8 @@
     "axios": "^1.5.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "google-auth-library": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"
