@@ -513,30 +513,8 @@
 
         <div id="search-results" aria-live="polite" aria-atomic="true"></div>
 
-        <!-- Forum section (moved up - placed before the calendar) -->
-        <div class="forum">
-            <h2>Community Forum</h2>
-            <div class="forum-note">Leave a comment. Comments are saved locally and synced to the server when available.</div>
 
-            <form id="forum-form" class="forum-form" aria-label="Forum form">
-                <input id="forum-name" type="text" placeholder="Your name" required />
-                <textarea id="forum-comment" placeholder="Your comment" required></textarea>
-                <div class="forum-actions">
-                    <button type="submit" class="small-btn">Post</button>
-                    <button type="button" id="clear-comments" class="small-btn">Clear Local</button>
-                </div>
-            </form>
 
-            <div id="forum-sync-note" class="forum-footer"></div>
-
-            <div id="comments-list" class="comments-list"></div>
-
-            <div class="api-note">
-                If your static site and API are on different hosts, set the API host by adding before the forum script:
-                <br/><code>&lt;script&gt;window.API_BASE = 'https://api.yourdomain.com';&lt;/script&gt;</code>
-            </div>
-        </div>
-   77
 <script src="https://giscus.app/client.js"
         data-repo="dgalanto/spring-break-2026"
         data-repo-id="R_kgDOREVqsQ"
@@ -551,7 +529,8 @@
         data-lang="en"
         crossorigin="anonymous"
         async>
-</script>77
+</script>
+        
         <div class="calendar">
             <h2>��� March 2026 Calendar</h2>
             <table>
