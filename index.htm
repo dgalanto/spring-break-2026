@@ -922,11 +922,10 @@
                 
                 if (!name || !text) return;
 
+                // Send raw data to server - let server handle sanitization
                 const comment = {
-                    id: Date.now().toString(),
-                    name: sanitizeInput(name),
-                    text: sanitizeInput(text),
-                    created_at: new Date().toISOString()
+                    name: name,
+                    text: text
                 };
 
                 try {
@@ -946,8 +945,15 @@
                 } catch (err) {
                     console.warn('Failed to post to server, using localStorage:', err);
                     useLocalStorage = true;
-                    saveCommentLocal(comment);
-                    addCommentToUI(comment);
+                    // Create full comment object for localStorage
+                    const localComment = {
+                        id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
+                        name: sanitizeInput(name),
+                        text: sanitizeInput(text),
+                        created_at: new Date().toISOString()
+                    };
+                    saveCommentLocal(localComment);
+                    addCommentToUI(localComment);
                     commentForm.reset();
                 }
             });

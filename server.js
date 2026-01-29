@@ -25,13 +25,42 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// Configure CORS with restrictions (allow localhost for development)
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        // Allow localhost and local development
+        if (origin.match(/^http:\/\/localhost(:\d+)?$/)) {
+            return callback(null, true);
+        }
+        // In production, you should whitelist specific domains
+        // For now, reject other origins
+        callback(new Error('Not allowed by CORS'));
+    }
+};
+
+app.use(cors(corsOptions));
 app.use(bodyParser.json());
 
 // Rate limiter for static file access
 const staticFileRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+
+// Rate limiter for API endpoints (more restrictive)
+const apiRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 50, // limit each IP to 50 API requests per windowMs
+    message: 'Too many API requests from this IP, please try again later.'
+});
+
+// Rate limiter for expensive operations (Gemini proxy)
+const expensiveRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // limit each IP to 10 expensive requests per windowMs
     message: 'Too many requests from this IP, please try again later.'
 });
 
@@ -95,18 +124,26 @@ async function saveComments(newList) {
 
 // --- Comments API ---
 
-app.get('/api/comments', async (req, res) => {
+app.get('/api/comments', apiRateLimiter, async (req, res) => {
     const list = await loadComments();
     // return newest first
     res.json(list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
 });
 
-app.post('/api/comments', async (req, res) => {
+app.post('/api/comments', apiRateLimiter, async (req, res) => {
     const body = req.body || {};
     const name = (body.name || '').trim();
     const text = (body.text || body.comment || body.message || '').trim();
+    
+    // Validate input lengths
     if (!name || !text) {
         return res.status(400).json({ error: 'name and comment text are required' });
+    }
+    if (name.length > 100) {
+        return res.status(400).json({ error: 'name must be 100 characters or less' });
+    }
+    if (text.length > 1000) {
+        return res.status(400).json({ error: 'comment text must be 1000 characters or less' });
     }
 
     const item = {
@@ -156,11 +193,21 @@ app.get('/', staticFileRateLimiter, (req, res) => {
  * for Gemini/Google generative endpoints may differ — adapt the call in callGemini(...) to match
  * the specific API you use.
  */
-app.post('/api/gemini-search', async (req, res) => {
+app.post('/api/gemini-search', expensiveRateLimiter, async (req, res) => {
     const { query, budget = 'affordable', max_results = 6 } = req.body || {};
 
+    // Validate inputs
     if (!query || typeof query !== 'string') {
         return res.status(400).json({ error: 'query is required' });
+    }
+    if (query.length > 500) {
+        return res.status(400).json({ error: 'query must be 500 characters or less' });
+    }
+    if (!['affordable', 'moderate', 'luxury'].includes(budget)) {
+        return res.status(400).json({ error: 'budget must be one of: affordable, moderate, luxury' });
+    }
+    if (typeof max_results !== 'number' || max_results < 1 || max_results > 20) {
+        return res.status(400).json({ error: 'max_results must be a number between 1 and 20' });
     }
 
     try {
@@ -169,7 +216,8 @@ app.post('/api/gemini-search', async (req, res) => {
         return res.json({ results });
     } catch (err) {
         console.error('Gemini proxy error', err && err.stack ? err.stack : err);
-        return res.status(502).json({ error: 'failed to query Gemini model', detail: String(err.message || err) });
+        // Don't expose internal error details to client
+        return res.status(502).json({ error: 'Failed to process your request. Please try again later.' });
     }
 });
 
