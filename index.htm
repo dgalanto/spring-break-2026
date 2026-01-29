@@ -425,6 +425,7 @@
 
         // ------------------------------
         // Forum: localStorage + GitHub-backed server sync (/api/comments)
+        // Debug-friendly version with configurable API base and detailed error messages
         // ------------------------------
 
         const forumForm = document.getElementById('forum-form');
@@ -435,6 +436,17 @@
         const forumSyncNote = document.getElementById('forum-sync-note');
 
         const STORAGE_KEY = 'sb_comments_v1';
+
+        // Configurable API base: set window.API_BASE to override
+        // Falls back to http://localhost:3000 when loaded via file:// for quick dev
+        function getApiBase() {
+            if (window.API_BASE) return window.API_BASE;
+            if (window.location.protocol === 'file:') return 'http://localhost:3000';
+            return ''; // relative path when served from same origin
+        }
+
+        // Expose for debugging
+        window.sb_apiUrl = () => getApiBase();
 
         document.addEventListener('DOMContentLoaded', () => {
             renderComments(loadComments());
@@ -460,19 +472,35 @@
             forumForm.reset();
 
             try {
-                const res = await fetch('/api/comments', {
+                const url = getApiBase() + '/api/comments';
+                console.log('POST', url, { name: tempComment.name, text: tempComment.text });
+                const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ name: tempComment.name, text: tempComment.text })
                 });
 
                 if (!res.ok) {
-                    forumSyncNote.textContent = 'Comment saved locally (server sync failed).';
-                    setTimeout(()=>forumSyncNote.textContent='',3000);
+                    let errorDetail = `Server returned ${res.status}`;
+                    try {
+                        const errData = await res.json();
+                        console.error('POST /api/comments error response:', errData);
+                        if (errData.github) {
+                            errorDetail += ` - GitHub error: ${JSON.stringify(errData.github)}`;
+                        } else if (errData.detail) {
+                            errorDetail += ` - ${errData.detail}`;
+                        }
+                    } catch (parseErr) {
+                        // response not JSON
+                    }
+                    forumSyncNote.textContent = `Comment saved locally (server sync failed: ${errorDetail})`;
+                    setTimeout(()=>forumSyncNote.textContent='',8000);
                     return;
                 }
 
                 const saved = await res.json(); // server returns saved object with id starting with "srv_"
+                console.log('Comment saved to server:', saved);
                 const after = loadComments();
                 const idx = after.findIndex(c => c.id === tempId);
                 const serverItem = Object.assign({}, saved, { synced: true });
@@ -483,8 +511,9 @@
                 forumSyncNote.textContent = 'Comment synced to server.';
                 setTimeout(()=>forumSyncNote.textContent='',3000);
             } catch (err) {
-                forumSyncNote.textContent = 'Comment saved locally. Server sync unavailable.';
-                setTimeout(()=>forumSyncNote.textContent='',3000);
+                console.error('POST /api/comments network error:', err);
+                forumSyncNote.textContent = `Comment saved locally. Server sync unavailable: ${err.message}`;
+                setTimeout(()=>forumSyncNote.textContent='',8000);
             }
         });
 
@@ -535,16 +564,31 @@
             // If id looks like server id (we prefix with "srv_"), attempt server delete
             const isServerId = String(id).startsWith('srv_');
             if (isServerId) {
-                fetch(`/api/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(()=>{});
+                const url = getApiBase() + `/api/comments/${encodeURIComponent(id)}`;
+                fetch(url, { method: 'DELETE', credentials: 'include' }).catch((err)=>{
+                    console.warn('DELETE failed:', err);
+                });
             }
         }
 
         // Merge server comments into local storage (server comments marked synced)
         async function checkCommentsEndpoint({ silent = true } = {}) {
             try {
-                const res = await fetch('/api/comments');
+                const url = getApiBase() + '/api/comments';
+                const res = await fetch(url, { credentials: 'include' });
                 if (!res.ok) {
-                    if (!silent) { forumSyncNote.textContent = 'Server comments endpoint not available.'; setTimeout(()=>forumSyncNote.textContent='',3000); }
+                    let errorDetail = `Server returned ${res.status}`;
+                    try {
+                        const errData = await res.json();
+                        console.error('GET /api/comments error response:', errData);
+                        if (errData.detail) errorDetail += ` - ${errData.detail}`;
+                    } catch (parseErr) {
+                        // response not JSON
+                    }
+                    if (!silent) {
+                        forumSyncNote.textContent = `Server comments endpoint not available: ${errorDetail}`;
+                        setTimeout(()=>forumSyncNote.textContent='',5000);
+                    }
                     return;
                 }
                 const serverComments = await res.json();
@@ -556,12 +600,22 @@
                     const merged = Array.from(map.values()).sort((a,b)=> (b.created_at||0)-(a.created_at||0));
                     saveComments(merged);
                     renderComments(merged);
-                    if (!silent) { forumSyncNote.textContent = 'Loaded comments from server.'; setTimeout(()=>forumSyncNote.textContent='',3000); }
+                    if (!silent) {
+                        forumSyncNote.textContent = `Loaded ${serverComments.length} comments from server (API: ${getApiBase() || 'relative'}).`;
+                        setTimeout(()=>forumSyncNote.textContent='',3000);
+                    }
                 }
             } catch (err) {
-                // ignore
+                console.error('GET /api/comments network error:', err);
+                if (!silent) {
+                    forumSyncNote.textContent = `Server sync unavailable: ${err.message}`;
+                    setTimeout(()=>forumSyncNote.textContent='',5000);
+                }
             }
         }
+
+        // Expose for manual debugging
+        window.sb_checkCommentsEndpoint = checkCommentsEndpoint;
     </script>
 </body>
 </html>
