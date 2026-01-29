@@ -20,6 +20,7 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,8 +28,20 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Serve static files (HTML, CSS, etc.)
-app.use(express.static(__dirname));
+// Rate limiter for static file access
+const staticFileRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+
+// Serve only index.htm and README.md (no directory browsing or sensitive files)
+app.get('/index.htm', staticFileRateLimiter, (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.htm'));
+});
+app.get('/README.md', staticFileRateLimiter, (req, res) => {
+    res.sendFile(path.join(__dirname, 'README.md'));
+});
 
 // File-backed comments store
 const DATA_DIR = path.join(__dirname, 'data');
@@ -110,7 +123,14 @@ app.post('/api/comments', async (req, res) => {
     res.status(201).json(item);
 });
 
-app.delete('/api/comments/:id', async (req, res) => {
+// Rate limiter for delete operations
+const deleteRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // limit each IP to 10 delete requests per windowMs
+    message: 'Too many delete requests from this IP, please try again later.'
+});
+
+app.delete('/api/comments/:id', deleteRateLimiter, async (req, res) => {
     const id = req.params.id;
     const list = await loadComments();
     const next = list.filter(c => c.id !== id);
@@ -122,7 +142,7 @@ app.delete('/api/comments/:id', async (req, res) => {
 });
 
 // Serve index.htm at root
-app.get('/', (req, res) => {
+app.get('/', staticFileRateLimiter, (req, res) => {
     res.sendFile(path.join(__dirname, 'index.htm'));
 });
 
@@ -241,7 +261,8 @@ Return the array now.`;
 
 // Sanitize user input (very small, server-side)
 function sanitize(s) {
-    return String(s).replace(/<\s*script/ig, '').replace(/<\/\s*script/ig, '');
+    // Remove all < and > characters to prevent any HTML injection
+    return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // Start server
