@@ -1,24 +1,15 @@
 {
-  "name": "spring-break-server",
+  "name": "spring-break-search-proxy",
   "version": "1.0.0",
-  "description": "Small Express server to proxy Gemini and store comments (GitHub-backed example)",
+  "description": "Server proxy for Google Custom Search used by spring-break-2026 site",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "axios": "^1.5.0",
-    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
-    "google-auth-library": "^9.0.0"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "engines": {
-    "node": ">=16"
+    "node-fetch": "^2.6.7"
   }
 }
