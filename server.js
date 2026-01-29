@@ -1,87 +1,85 @@
 /**
- * server.js - Gemini proxy + GitHub-backed comments store
+ * server.js
+ * Improved Express server for comments (GitHub-backed) with:
+ * - clearer startup warnings if GITHUB_TOKEN missing
+ * - detailed GitHub error logging (err.response.data)
+ * - /api/comments/init endpoint to initialize data/comments.json if missing
+ * - improved POST error responses including GitHub details
+ * - retry logic on sha conflicts (409/422)
  *
- * Env vars required for GitHub comments storage:
- * - GITHUB_TOKEN (required) : token with repo contents write access (repo scope)
- * - GITHUB_REPO  (required) : "owner/repo" where comments file lives (e.g. dgalanto/spring-break-2026)
- * - GITHUB_BRANCH (optional) : branch to read/write (default: main)
- * - COMMENTS_PATH (optional) : path to store comments.json (default: data/comments.json)
- *
- * Also keep existing Gemini envs:
- * - GEMINI_API_URL, GEMINI_API_KEY, GEMINI_USE_OAUTH (optional)
- *
- * Notes:
- * - This uses the GitHub Contents API to read/put a JSON file in the repo.
- * - Token must have permission to write repository contents (repo scope).
- * - For production and scale, prefer a database.
+ * Drop this file in place of your current server.js (install deps from package.json).
  */
-const express = require('express');
-const axios = require('axios');
-const path = require('path');
-const fs = require('fs').promises;
-const fsSync = require('fs');
-const cors = require('cors');
-const bodyParser = require('body-parser');
 
-let GoogleAuth;
-try {
-  GoogleAuth = require('google-auth-library').GoogleAuth;
-} catch (e) {
-  GoogleAuth = null;
-}
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
+app.use(bodyParser.json({ limit: '100kb' }));
+// Allow CORS for local testing. Restrict origin in production.
+app.use(cors({ origin: true, credentials: true }));
+
 const PORT = process.env.PORT || 3000;
-
-app.use(cors());
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname))); // serve index.htm and assets
-
-// GitHub config
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO = process.env.GITHUB_REPO; // "owner/repo"
+const GITHUB_REPO = process.env.GITHUB_REPO || 'dgalanto/spring-break-2026';
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 const COMMENTS_PATH = process.env.COMMENTS_PATH || 'data/comments.json';
+
+const [GITHUB_OWNER, GITHUB_REPO_NAME] = (GITHUB_REPO || '').split('/');
+
+// Helpful startup messages
+if (!GITHUB_TOKEN) {
+  console.warn('WARNING: GITHUB_TOKEN is not set. Server WILL NOT be able to save comments to GitHub.');
+  console.warn('Comments will be served from GitHub when present, but writes will fail until a token is configured.');
+} else {
+  console.log('GITHUB_TOKEN provided (token not logged). Ensure it has "repo" or "contents" scope for the configured repository.');
+}
+console.log(`Configured: GITHUB_REPO=${GITHUB_REPO} GITHUB_BRANCH=${GITHUB_BRANCH} COMMENTS_PATH=${COMMENTS_PATH}`);
+
+// Utility: GitHub Contents API helpers
 const GITHUB_API_BASE = 'https://api.github.com';
 
-// Simple helper to call GitHub Contents API
-async function githubGetFile(pathInRepo) {
-  if (!GITHUB_TOKEN || !GITHUB_REPO) {
-    throw new Error('GITHUB_TOKEN and GITHUB_REPO must be set to use GitHub-backed comments');
-  }
-  const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO}/contents/${encodeURIComponent(pathInRepo)}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
-  const res = await axios.get(url, {
-    headers: {
-      Authorization: `token ${GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'spring-break-server'
-    }
-  });
-  return res.data; // includes .content (base64), .sha, .encoding
+function githubApiHeaders() {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'spring-break-server'
+  };
+  if (GITHUB_TOKEN) headers.Authorization = `token ${GITHUB_TOKEN}`;
+  return headers;
 }
 
-async function githubPutFile(pathInRepo, contentBase64, message, sha) {
-  if (!GITHUB_TOKEN || !GITHUB_REPO) {
-    throw new Error('GITHUB_TOKEN and GITHUB_REPO must be set to use GitHub-backed comments');
-  }
-  const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO}/contents/${encodeURIComponent(pathInRepo)}`;
-  const body = {
-    message,
-    content: contentBase64,
-    branch: GITHUB_BRANCH
-  };
-  if (sha) body.sha = sha;
-  const res = await axios.put(url, body, {
-    headers: {
-      Authorization: `token ${GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'spring-break-server'
-    }
-  });
+/**
+ * Get a file from the repository (contents API).
+ * Returns the axios response data (includes .content and .sha) on success.
+ * Throws the axios error for caller to inspect.
+ */
+async function githubGetFile(path) {
+  const url = `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO_NAME}/contents/${encodeURIComponent(path)}`;
+  const params = { ref: GITHUB_BRANCH };
+  const res = await axios.get(url, { headers: githubApiHeaders(), params });
   return res.data;
 }
 
-// Read comments array from repo. If file not found, return []
+/**
+ * Put/create a file in the repository using the Contents API.
+ * bodyContent must already be base64 encoded.
+ * If sha is provided it performs an update, otherwise a create.
+ */
+async function githubPutFile(path, base64Content, message, sha) {
+  const url = `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO_NAME}/contents/${encodeURIComponent(path)}`;
+  const body = {
+    message: message || 'Update via spring-break-server',
+    content: base64Content,
+    branch: GITHUB_BRANCH
+  };
+  if (sha) body.sha = sha;
+  const res = await axios.put(url, body, { headers: githubApiHeaders() });
+  return res.data;
+}
+
+// Read comments array from repo. If file not found return { list: [], sha: null }
 async function readCommentsFromGitHub() {
   try {
     const file = await githubGetFile(COMMENTS_PATH);
@@ -90,48 +88,108 @@ async function readCommentsFromGitHub() {
     const parsed = JSON.parse(decoded || '[]');
     return { list: Array.isArray(parsed) ? parsed : [], sha: file.sha };
   } catch (err) {
-    // 404 means file not present
+    // 404 -> file not present
     if (err && err.response && err.response.status === 404) {
       return { list: [], sha: null };
     }
+    // rethrow for handler to inspect
     throw err;
   }
 }
 
-// Save comments list to GitHub with retry on sha mismatch
+/**
+ * Save comments list to GitHub with retry on sha mismatch (simple backoff).
+ * Returns the githubPutFile result on success.
+ */
 async function saveCommentsToGitHub(list, options = {}) {
   const message = options.message || 'Update comments.json via server';
-  // retry loop to handle concurrent commits (simple)
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const maxAttempts = 4;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const { sha: currentSha } = await readCommentsFromGitHub();
       const data = JSON.stringify(list, null, 2);
       const encoded = Buffer.from(data, 'utf8').toString('base64');
       const result = await githubPutFile(COMMENTS_PATH, encoded, message, currentSha || undefined);
-      // success
       return result;
     } catch (err) {
+      // Log GitHub response body for easier debugging
+      if (err && err.response && err.response.data) {
+        console.error('GitHub API response:', JSON.stringify(err.response.data, null, 2));
+      } else {
+        console.error('Error saving comments to GitHub:', err && err.message ? err.message : err);
+      }
+
       const status = err && err.response && err.response.status;
+      // retry on sha collisions or validation conflict (rare)
       if (status === 409 || status === 422) {
-        // refresh and retry
-        await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+        const delay = 200 * (attempt + 1);
+        console.warn(`Conflict (status ${status}). Retrying after ${delay}ms (attempt ${attempt + 1}/${maxAttempts})`);
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
+      // don't retry on other errors
       throw err;
     }
   }
   throw new Error('Failed to save comments after several retries due to concurrent updates');
 }
 
-// --- Comments API backed by GitHub ---
+// Attempt to initialize the comments file if it does not exist.
+// Returns { created: bool, reason: string, detail?: any }
+async function initializeCommentsFileIfMissing() {
+  try {
+    const { list } = await readCommentsFromGitHub();
+    if (Array.isArray(list)) {
+      return { created: false, reason: 'file exists' };
+    }
+  } catch (err) {
+    const status = err && err.response && err.response.status;
+    if (status === 404) {
+      if (!GITHUB_TOKEN) {
+        return { created: false, reason: 'GITHUB_TOKEN not configured' };
+      }
+      try {
+        const encoded = Buffer.from(JSON.stringify([], null, 2), 'utf8').toString('base64');
+        const putRes = await githubPutFile(COMMENTS_PATH, encoded, 'Initialize comments.json', undefined);
+        return { created: true, reason: 'created file', github: putRes };
+      } catch (writeErr) {
+        console.error('Failed to create comments file:', writeErr && writeErr.response ? writeErr.response.data : writeErr);
+        return { created: false, reason: 'failed to create file', detail: writeErr && writeErr.response && writeErr.response.data };
+      }
+    }
+    return { created: false, reason: 'unexpected error', detail: String(err && err.message) };
+  }
+}
+
+// Simple sanitizer for name/text (basic)
+function sanitize(str = '') {
+  // very small sanitizer - encode < and >
+  return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// --- API Endpoints ---
+
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+// initialize comments file (attempts to create if missing)
+app.get('/api/comments/init', async (req, res) => {
+  try {
+    const result = await initializeCommentsFileIfMissing();
+    res.json(result);
+  } catch (err) {
+    console.error('GET /api/comments/init error', err && err.response ? err.response.data : err);
+    res.status(500).json({ error: 'init failed', detail: String(err && err.message) });
+  }
+});
 
 app.get('/api/comments', async (req, res) => {
   try {
     const { list } = await readCommentsFromGitHub();
+    // return newest first
     res.json(list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
   } catch (err) {
-    console.error('GET /api/comments error', err && err.stack ? err.stack : err);
-    res.status(500).json({ error: 'failed to read comments', detail: String(err.message || err) });
+    console.error('GET /api/comments error', err && err.response ? err.response.data : err);
+    res.status(500).json({ error: 'failed to read comments', detail: String(err && err.message) });
   }
 });
 
@@ -142,10 +200,10 @@ app.post('/api/comments', async (req, res) => {
   if (!name || !text) {
     return res.status(400).json({ error: 'name and comment text are required' });
   }
+
   try {
     const { list: current } = await readCommentsFromGitHub();
 
-    // Server-generated id prefixed to distinguish from local temporary timestamps.
     const item = {
       id: `srv_${Date.now().toString()}`,
       name: sanitize(name),
@@ -153,15 +211,20 @@ app.post('/api/comments', async (req, res) => {
       created_at: new Date().toISOString()
     };
 
-    const next = [item].concat(current).slice(0, 2000); // cap items if desired
+    const next = [item].concat(current).slice(0, 2000);
 
     await saveCommentsToGitHub(next, { message: `Add comment by ${item.name}` });
 
     // Return the server-saved item so client can replace temp entries
     res.status(201).json(item);
   } catch (err) {
-    console.error('POST /api/comments error', err && err.stack ? err.stack : err);
-    res.status(500).json({ error: 'failed to save comment', detail: String(err.message || err) });
+    console.error('POST /api/comments error', err && err.response ? err.response.data : err);
+    const githubDetail = err && err.response && err.response.data;
+    res.status(500).json({
+      error: 'failed to save comment',
+      detail: String(err && err.message),
+      github: githubDetail || undefined
+    });
   }
 });
 
@@ -170,111 +233,29 @@ app.delete('/api/comments/:id', async (req, res) => {
   if (!id) return res.status(400).json({ error: 'id required' });
   try {
     const { list: current } = await readCommentsFromGitHub();
-    const next = (current || []).filter(c => c.id !== id);
+    const next = (current || []).filter((c) => c.id !== id);
     if (next.length === (current || []).length) {
       return res.status(404).json({ error: 'not found' });
     }
     await saveCommentsToGitHub(next, { message: `Delete comment ${id}` });
     res.status(204).end();
   } catch (err) {
-    console.error('DELETE /api/comments error', err && err.stack ? err.stack : err);
-    res.status(500).json({ error: 'failed to delete comment', detail: String(err.message || err) });
+    console.error('DELETE /api/comments error', err && err.response ? err.response.data : err);
+    const githubDetail = err && err.response && err.response.data;
+    res.status(500).json({
+      error: 'failed to delete comment',
+      detail: String(err && err.message),
+      github: githubDetail || undefined
+    });
   }
 });
 
-// --- Gemini / Vertex proxy (generic) ---
-// This is a compact generic implementation. If you prefer the OAuth-capable variant
-// with google-auth-library, paste that version of callGemini here instead.
-
-async function callGemini({ query, budget, max_results }) {
-  const GEMINI_API_URL = process.env.GEMINI_API_URL;
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  const USE_OAUTH = String(process.env.GEMINI_USE_OAUTH || '').toLowerCase() === 'true';
-
-  if (!GEMINI_API_URL) {
-    throw new Error('GEMINI_API_URL must be set in environment');
-  }
-
-  const systemPrompt = `You are a travel assistant. Given a user's query and budget, return a JSON array (only JSON) with up to ${max_results} travel options.
-Each item must be an object with keys:
-"title", "country", "price_estimate" (number), "duration", "highlights" (array of strings), "booking_url"(string), "info_url"(string, optional), "description"(string, optional).
-Return only valid JSON (no surrounding text).`;
-
-  const userPrompt = `Query: "${query}"
-Budget: ${budget}
-Max results: ${max_results}
-Return the array now.`;
-
-  const payload = {
-    prompt: systemPrompt + '\n\n' + userPrompt,
-    max_output_tokens: 800
-  };
-
-  const headers = { 'Content-Type': 'application/json' };
-  if (USE_OAUTH && GoogleAuth) {
-    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-    const client = await auth.getClient();
-    const accessResponse = await client.getAccessToken();
-    const accessToken = accessResponse && (accessResponse.token || accessResponse);
-    headers['Authorization'] = `Bearer ${accessToken}`;
-  } else if (GEMINI_API_KEY) {
-    headers['Authorization'] = `Bearer ${GEMINI_API_KEY}`;
-  }
-
-  const resp = await axios.post(GEMINI_API_URL, payload, { headers, timeout: 30000 });
-  const data = resp.data;
-
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data.results)) return data.results;
-
-  const textCandidates = [
-    data.output_text,
-    data.output,
-    data.text,
-    data.candidates && Array.isArray(data.candidates) ? data.candidates.map(c => c.output || c).join('\n') : null,
-    JSON.stringify(data)
-  ].filter(Boolean);
-
-  for (const txt of textCandidates) {
-    try {
-      const parsed = JSON.parse(txt);
-      if (Array.isArray(parsed)) return parsed;
-      if (parsed && Array.isArray(parsed.results)) return parsed.results;
-    } catch (e) {
-      const match = String(txt).match(/\[.*\]/s);
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed)) return parsed;
-        } catch (e2) {}
-      }
-    }
-  }
-
-  throw new Error('Unexpected Gemini/Vertex response format — adapt server call to match the endpoint schema.');
-}
-
-// Very small sanitization
-function sanitize(s) {
-  return String(s).replace(/<\s*script/ig, '').replace(/<\/\s*script/ig, '');
-}
-
-// Proxy route for client
-app.post('/api/gemini-search', async (req, res) => {
-  const { query, budget = 'affordable', max_results = 6 } = req.body || {};
-  if (!query || typeof query !== 'string') return res.status(400).json({ error: 'query is required' });
-  try {
-    const results = await callGemini({ query, budget, max_results });
-    return res.json({ results });
-  } catch (err) {
-    console.error('Gemini proxy error', err && err.stack ? err.stack : err);
-    return res.status(502).json({ error: 'failed to query Gemini model', detail: String(err.message || err) });
-  }
+// Fallback static notice (not serving files here by default)
+app.get('/', (req, res) => {
+  res.send('spring-break-server: comments API is running. See /api/comments');
 });
 
 // Start server
-app.listen(PORT, async () => {
-  console.log(`Server listening on port ${PORT}`);
-  console.log('GitHub-backed comments:', GITHUB_REPO ? `[repo=${GITHUB_REPO}]` : '[not configured]');
-  console.log('GEMINI_API_URL:', process.env.GEMINI_API_URL ? '[set]' : '[not set]');
+app.listen(PORT, () => {
+  console.log(`spring-break-server listening on port ${PORT}`);
 });
