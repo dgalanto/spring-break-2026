@@ -1,13 +1,16 @@
 /**
  * server.js
- * Improved Express server for comments (GitHub-backed) with:
- * - clearer startup warnings if GITHUB_TOKEN missing
- * - detailed GitHub error logging (err.response.data)
- * - /api/comments/init endpoint to initialize data/comments.json if missing
- * - improved POST error responses including GitHub details
- * - retry logic on sha conflicts (409/422)
+ * Improved Express server for comments (GitHub-backed)
  *
- * Drop this file in place of your current server.js (install deps from package.json).
+ * - Startup warnings if GITHUB_TOKEN missing
+ * - Detailed GitHub error logging (err.response.data)
+ * - /api/comments/init endpoint to initialize data/comments.json if missing
+ * - Improved POST/DELETE error responses including GitHub details
+ * - Retry logic on sha conflicts (409/422)
+ * - Lightweight request logging and explicit OPTIONS handler to diagnose proxy/CORS
+ * - Binds to 0.0.0.0 (helpful for testing from other devices)
+ *
+ * Note: Remove or restrict request logging and bind address for strict production use.
  */
 
 const express = require('express');
@@ -17,17 +20,24 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
+app.use(bodyParser.json({ limit: '100kb' }));
+// Allow CORS for development. Restrict origin in production.
+app.use(cors({ origin: true, credentials: true }));
 
-// Temporary request logging for debugging production proxy/CORS issues
-// Can be removed after deployment verification
+// Debug logging - temporary, remove if desired
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'} - Host: ${req.headers.host}`);
+  console.log(`[REQ] ${new Date().toISOString()} ${req.method} ${req.originalUrl} origin=${req.headers.origin || '-'}`);
   next();
 });
 
-app.use(bodyParser.json({ limit: '100kb' }));
-// Allow CORS for local testing. Restrict origin in production.
-app.use(cors({ origin: true, credentials: true }));
+// Explicit OPTIONS handler for /api/* (helps preflight issues)
+app.options('/api/*', (req, res) => {
+  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.set('Access-Control-Allow-Credentials', 'true');
+  res.status(204).end();
+});
 
 const PORT = process.env.PORT || 3000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -37,7 +47,6 @@ const COMMENTS_PATH = process.env.COMMENTS_PATH || 'data/comments.json';
 
 const [GITHUB_OWNER, GITHUB_REPO_NAME] = (GITHUB_REPO || '').split('/');
 
-// Helpful startup messages
 if (!GITHUB_TOKEN) {
   console.warn('WARNING: GITHUB_TOKEN is not set. Server WILL NOT be able to save comments to GitHub.');
   console.warn('Comments will be served from GitHub when present, but writes will fail until a token is configured.');
@@ -46,7 +55,6 @@ if (!GITHUB_TOKEN) {
 }
 console.log(`Configured: GITHUB_REPO=${GITHUB_REPO} GITHUB_BRANCH=${GITHUB_BRANCH} COMMENTS_PATH=${COMMENTS_PATH}`);
 
-// Utility: GitHub Contents API helpers
 const GITHUB_API_BASE = 'https://api.github.com';
 
 function githubApiHeaders() {
@@ -58,11 +66,6 @@ function githubApiHeaders() {
   return headers;
 }
 
-/**
- * Get a file from the repository (contents API).
- * Returns the axios response data (includes .content and .sha) on success.
- * Throws the axios error for caller to inspect.
- */
 async function githubGetFile(path) {
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO_NAME}/contents/${encodeURIComponent(path)}`;
   const params = { ref: GITHUB_BRANCH };
@@ -70,11 +73,6 @@ async function githubGetFile(path) {
   return res.data;
 }
 
-/**
- * Put/create a file in the repository using the Contents API.
- * bodyContent must already be base64 encoded.
- * If sha is provided it performs an update, otherwise a create.
- */
 async function githubPutFile(path, base64Content, message, sha) {
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO_NAME}/contents/${encodeURIComponent(path)}`;
   const body = {
@@ -87,7 +85,6 @@ async function githubPutFile(path, base64Content, message, sha) {
   return res.data;
 }
 
-// Read comments array from repo. If file not found return { list: [], sha: null }
 async function readCommentsFromGitHub() {
   try {
     const file = await githubGetFile(COMMENTS_PATH);
@@ -96,19 +93,13 @@ async function readCommentsFromGitHub() {
     const parsed = JSON.parse(decoded || '[]');
     return { list: Array.isArray(parsed) ? parsed : [], sha: file.sha };
   } catch (err) {
-    // 404 -> file not present
     if (err && err.response && err.response.status === 404) {
       return { list: [], sha: null };
     }
-    // rethrow for handler to inspect
     throw err;
   }
 }
 
-/**
- * Save comments list to GitHub with retry on sha mismatch (simple backoff).
- * Returns the githubPutFile result on success.
- */
 async function saveCommentsToGitHub(list, options = {}) {
   const message = options.message || 'Update comments.json via server';
   const maxAttempts = 4;
@@ -120,7 +111,6 @@ async function saveCommentsToGitHub(list, options = {}) {
       const result = await githubPutFile(COMMENTS_PATH, encoded, message, currentSha || undefined);
       return result;
     } catch (err) {
-      // Log GitHub response body for easier debugging
       if (err && err.response && err.response.data) {
         console.error('GitHub API response:', JSON.stringify(err.response.data, null, 2));
       } else {
@@ -128,22 +118,18 @@ async function saveCommentsToGitHub(list, options = {}) {
       }
 
       const status = err && err.response && err.response.status;
-      // retry on sha collisions or validation conflict (rare)
       if (status === 409 || status === 422) {
         const delay = 200 * (attempt + 1);
         console.warn(`Conflict (status ${status}). Retrying after ${delay}ms (attempt ${attempt + 1}/${maxAttempts})`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
-      // don't retry on other errors
       throw err;
     }
   }
   throw new Error('Failed to save comments after several retries due to concurrent updates');
 }
 
-// Attempt to initialize the comments file if it does not exist.
-// Returns { created: bool, reason: string, detail?: any }
 async function initializeCommentsFileIfMissing() {
   try {
     const { list } = await readCommentsFromGitHub();
@@ -169,26 +155,14 @@ async function initializeCommentsFileIfMissing() {
   }
 }
 
-// Simple sanitizer for name/text (basic)
 function sanitize(str = '') {
-  // very small sanitizer - encode < and >
   return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// --- API Endpoints ---
-
-// Explicit OPTIONS handler for /api/* to help with preflight CORS requests
-app.options('/api/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.status(204).end();
-});
+// --- API ---
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-// initialize comments file (attempts to create if missing)
 app.get('/api/comments/init', async (req, res) => {
   try {
     const result = await initializeCommentsFileIfMissing();
@@ -202,7 +176,6 @@ app.get('/api/comments/init', async (req, res) => {
 app.get('/api/comments', async (req, res) => {
   try {
     const { list } = await readCommentsFromGitHub();
-    // return newest first
     res.json(list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
   } catch (err) {
     console.error('GET /api/comments error', err && err.response ? err.response.data : err);
@@ -232,7 +205,6 @@ app.post('/api/comments', async (req, res) => {
 
     await saveCommentsToGitHub(next, { message: `Add comment by ${item.name}` });
 
-    // Return the server-saved item so client can replace temp entries
     res.status(201).json(item);
   } catch (err) {
     console.error('POST /api/comments error', err && err.response ? err.response.data : err);
@@ -267,13 +239,12 @@ app.delete('/api/comments/:id', async (req, res) => {
   }
 });
 
-// Fallback static notice (not serving files here by default)
 app.get('/', (req, res) => {
   res.send('spring-break-server: comments API is running. See /api/comments');
 });
 
-// Start server
+// Bind to 0.0.0.0 so server can be reached from other machines (helpful for testing).
+// For strict production environments, you may choose to bind only to localhost and use a reverse proxy.
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`spring-break-server listening on port ${PORT} (bound to 0.0.0.0 for device access)`);
-  console.log('NOTE: For production, consider restricting CORS origin and binding to specific interface.');
+  console.log(`spring-break-server listening on port ${PORT}`);
 });
