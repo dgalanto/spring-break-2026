@@ -508,7 +508,7 @@
         </div>
 
         <div class="search-meta">
-            Results use an AI-powered search (server proxy to Google Custom Search). If the server is not configured or unreachable the client will open a Google search in a new tab and show local sample options.
+            Results use an AI-powered search (server proxy to Google Custom Search). If the server is not configured or unreachable the client will open a Google search in a new tab and show local sam[...]
         </div>
 
         <div id="search-results" aria-live="polite" aria-atomic="true"></div>
@@ -782,7 +782,8 @@
 
         function renderResults(items) {
             if (!items || items.length === 0) {
-                resultsEl.innerHTML = '<div class="error">No options found. Try a different query or check your server AI endpoint.</div>';
+                // No results — clear previous results and do not show the old error banner.
+                resultsEl.innerHTML = '';
                 return;
             }
             resultsEl.innerHTML = '';
@@ -862,145 +863,4 @@
 
         function mockSearch(query, budget) {
             const affordable = [
-                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_url: 'https://example.com/myrtle' },
-                { title: 'Cancún (budget package)', country: 'Mexico', price_estimate: 450, duration: '5 days', highlights: ['all-inclusive deals', 'beach', 'warm weather'], booking_url: 'https://example.com/cancun' },
-                { title: 'Gulf Shores, Alabama', country: 'USA', price_estimate: 290, duration: '3 days', highlights: ['short drive', 'affordable rentals', 'family-centred'], booking_url: 'https://example.com/gulfshores' },
-                { title: 'Puerto Vallarta (flight deals)', country: 'Mexico', price_estimate: 420, duration: '5 days', highlights: ['cheap flights', 'beach & culture', 'food'], booking_url: 'https://example.com/pv' },
-                { title: 'San Diego, California (deal hotels)', country: 'USA', price_estimate: 380, duration: '4 days', highlights: ['mild weather', 'family activities', 'beach'], booking_url: 'https://example.com/sandiego' },
-                { title: 'Fort Lauderdale (flight+hotel)', country: 'USA', price_estimate: 340, duration: '4 days', highlights: ['beach', 'easy flights', 'budget-friendly'], booking_url: 'https://example.com/ftlauderdale' }
-            ];
-
-            const q = (query || '').toLowerCase();
-            const filtered = affordable.filter(item =>
-                item.title.toLowerCase().includes(q) ||
-                (item.highlights || []).join(' ').toLowerCase().includes(q) ||
-                (item.country || '').toLowerCase().includes(q) ||
-                q === ''
-            );
-
-            if (budget === 'affordable') {
-                filtered.sort((a, b) => (a.price_estimate || 9999) - (b.price_estimate || 9999));
-            }
-
-            return filtered.slice(0, 6);
-        }
-    </script>
-
-    <!-- Minimal forum sync script (local-first; attempts to POST to /api/comments if available) -->
-    <script>
-    (function () {
-      const API_BASE = '';
-      const forumForm = document.getElementById('forum-form');
-      const forumName = document.getElementById('forum-name');
-      const forumComment = document.getElementById('forum-comment');
-      const commentsListEl = document.getElementById('comments-list');
-      const clearCommentsBtn = document.getElementById('clear-comments');
-      const forumSyncNote = document.getElementById('forum-sync-note');
-      const STORAGE_KEY = 'sb_comments_v1';
-
-      function loadComments() {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          return raw ? JSON.parse(raw) : [];
-        } catch (e) { return []; }
-      }
-
-      function saveComments(list) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0,200))); } catch (e) { console.warn('Failed to save comments', e); }
-      }
-
-      function sanitizeHTML(str) {
-        if (!str) return '';
-        const tmp = document.createElement('div');
-        tmp.textContent = str;
-        return tmp.innerHTML;
-      }
-
-      function renderComments(list) {
-        commentsListEl.innerHTML = '';
-        if (!list || list.length === 0) {
-          commentsListEl.innerHTML = '<div class="comment-item">No comments yet — be the first to share ideas!</div>';
-          return;
-        }
-        list.forEach(c => {
-          const item = document.createElement('div'); item.className='comment-item'; item.setAttribute('data-id', c.id);
-          const meta = document.createElement('div'); meta.className='comment-meta';
-          const when = new Date(c.created_at).toLocaleString();
-          meta.textContent = `${sanitizeHTML(c.name)} • ${when}` + (c.synced ? ' • synced' : ' • local');
-          const text = document.createElement('div'); text.className='comment-text'; text.innerHTML = sanitizeHTML(c.text);
-          const actions = document.createElement('div'); actions.className='comment-actions';
-          const delBtn = document.createElement('button'); delBtn.className='small-btn'; delBtn.textContent='Delete';
-          delBtn.addEventListener('click',()=>deleteComment(c.id));
-          actions.appendChild(delBtn);
-          item.appendChild(meta); item.appendChild(text); item.appendChild(actions);
-          commentsListEl.appendChild(item);
-        });
-      }
-
-      function deleteComment(id) {
-        let list = loadComments();
-        list = list.filter(c => c.id !== id);
-        saveComments(list);
-        renderComments(list);
-      }
-
-      if (forumForm) {
-        renderComments(loadComments());
-
-        forumForm.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const name = (forumName.value || '').trim();
-          const text = (forumComment.value || '').trim();
-          if (!name || !text) {
-            forumSyncNote.textContent = 'Name and comment required.';
-            setTimeout(()=>forumSyncNote.textContent='',3000);
-            return;
-          }
-
-          const tempId = Date.now().toString();
-          const tempComment = { id: tempId, name, text, created_at: new Date().toISOString(), synced: false };
-
-          const comments = loadComments();
-          comments.unshift(tempComment);
-          saveComments(comments);
-          renderComments(comments);
-          forumForm.reset();
-
-          // Try to sync to server endpoint if available
-          try {
-            const res = await fetch('/api/comments', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: tempComment.name, text: tempComment.text }),
-              credentials: 'include'
-            });
-
-            if (!res.ok) {
-              throw new Error('Server save failed');
-            }
-
-            const saved = await res.json();
-            const after = loadComments();
-            const idx = after.findIndex(c => c.id === tempId);
-            const serverItem = Object.assign({}, saved, { synced: true });
-            if (idx >= 0) after[idx] = serverItem; else after.unshift(serverItem);
-            saveComments(after);
-            renderComments(after);
-            forumSyncNote.textContent = 'Comment synced to server.';
-            setTimeout(()=>forumSyncNote.textContent='',3000);
-          } catch (err) {
-            forumSyncNote.textContent = 'Comment saved locally (server sync unavailable).';
-            setTimeout(()=>forumSyncNote.textContent='',3000);
-          }
-        });
-
-        clearCommentsBtn.addEventListener('click', () => {
-          if (!confirm('Clear all local comments? This cannot be undone.')) return;
-          localStorage.removeItem(STORAGE_KEY);
-          renderComments([]);
-        });
-      }
-    })();
-    </script>
-</body>
-</html>
+                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_ur[...]
