@@ -402,7 +402,119 @@
             height: 20px;
         }
 
-        /* small note about API wiring */
+        /* forum/collapsible */
+        .forum-section {
+            margin-bottom: 28px;
+        }
+
+        details.forum details {
+            margin-bottom: 12px;
+        }
+
+        details.forum summary {
+            font-weight: 700;
+            font-size: 1.05em;
+            padding: 12px 16px;
+            border-radius: 10px;
+            background: #f1fcff;
+            border: 1px solid #d9f6f8;
+            cursor: pointer;
+            color: #0b5960;
+            list-style: none;
+        }
+
+        .forum-body {
+            padding: 16px;
+            border: 1px solid #eef9fa;
+            border-top: none;
+            background: #ffffff;
+            border-radius: 0 0 10px 10px;
+        }
+
+        .forum-form-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .forum-form-row input[type="text"],
+        .forum-form-row textarea {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #e0f2f5;
+            width: 100%;
+            font-size: 0.95em;
+        }
+
+        .forum-form-row input[type="text"] {
+            max-width: 220px;
+        }
+
+        .forum-form-row textarea {
+            min-height: 72px;
+            resize: vertical;
+            flex: 1;
+        }
+
+        .forum-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .forum-btn {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(180deg, #2bb7c7 0%, #19a8b7 100%);
+            color: white;
+            font-weight: 600;
+        }
+
+        .comment-list {
+            margin-top: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .comment-item {
+            padding: 12px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            border: 1px solid #e6f7f9;
+        }
+
+        .comment-meta {
+            font-size: 0.9em;
+            color: #556;
+            margin-bottom: 6px;
+        }
+
+        .comment-text {
+            font-size: 0.95em;
+            color: #213;
+            line-height: 1.3;
+        }
+
+        .comment-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .small-btn {
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid #d0eef2;
+            background: white;
+            cursor: pointer;
+            font-size: 0.85em;
+            color: #0b5960;
+        }
+
         .api-note {
             margin-top: 8px;
             font-size: 0.9em;
@@ -437,10 +549,32 @@
         </div>
 
         <div class="search-meta">
-            Results use an AI-powered search (client makes request to your server-side AI endpoint). If no endpoint is configured the page will show sample/mock affordable options.
+            Results use an AI-powered search (client makes request to your server-side Gemini endpoint). If no endpoint is configured the page will show sample/mock affordable options.
         </div>
 
         <div id="search-results" aria-live="polite" aria-atomic="true"></div>
+
+        <!-- Collapsible forum inserted above the calendar -->
+        <div class="forum-section">
+            <details class="forum" open>
+                <summary>💬 Trip Discussion Forum — Add your name and comment</summary>
+                <div class="forum-body">
+                    <form id="forum-form" aria-label="Trip discussion form">
+                        <div class="forum-form-row">
+                            <input id="forum-name" name="name" type="text" placeholder="Your name" aria-label="Your name" required>
+                            <textarea id="forum-comment" name="comment" placeholder="Share ideas, questions, or plans..." aria-label="Comment" required></textarea>
+                        </div>
+                        <div class="forum-actions">
+                            <button class="forum-btn" type="submit">Post Comment</button>
+                            <button class="small-btn" id="clear-comments" type="button">Clear Local Comments</button>
+                        </div>
+                    </form>
+
+                    <div id="comments-list" class="comment-list" aria-live="polite" aria-atomic="true"></div>
+                    <div class="api-note" id="forum-sync-note"></div>
+                </div>
+            </details>
+        </div>
 
         <div class="calendar">
             <h2>📅 March 2026 Calendar</h2>
@@ -478,9 +612,8 @@
                             <span class="event nt-midterms">📚 NT Midterms</span>
                         </td>
                         <td>
-                            <div class="day-number">12</div>
+                            <div class="day-number">12</div></td>
                             <span class="event nt-midterms">📚 NT Midterms</span>
-                        </td>
                         <td>
                             <div class="day-number">13</div>
                             <span class="event nt-midterms">📚 NT Midterms</span>
@@ -548,6 +681,7 @@
                         </td>
                         <td><div class="day-number">31</div>
                             <span class="event nt-break">🏖️ NT Spring Break</span>
+                        </td>
                         <td class="empty"></td>
                         <td class="empty"></td>
                         <td class="empty"></td>
@@ -632,19 +766,20 @@
             </div>
         </div>
 
-        <div class="api-note">
-            To enable real AI results: implement a server endpoint (e.g. POST /api/ai-travel-search). The endpoint should accept a JSON body:
-            { "query": "...", "budget": "affordable|moderate|luxury" }
+        <div class="api-note" id="ai-api-note">
+            To enable real AI results with Google Gemini: implement a server endpoint (e.g. POST /api/gemini-search). The endpoint should accept a JSON body:
+            { "query": "...", "budget": "affordable|moderate|luxury", "max_results": 6 }
             and return an array of result objects:
             [{ "title": "Cancún, Mexico", "country":"Mexico", "price_estimate":350, "duration":"4 days", "highlights":["family-friendly","beach"], "booking_url":"https://..."}]
             The page will fall back to mock/sample data when no endpoint is available.
+            Additionally, the forum will try to POST each comment to POST /api/comments (optional) to allow server-side persistence.
         </div>
     </div>
 
     <script>
-        // Front-end: send query to a server-side AI endpoint (no API key on client).
-        // Replace '/api/ai-travel-search' with your own server route that queries your preferred AI (OpenAI/others)
-        // Server should handle rate limits, API keys, and return curated affordable options.
+        // Front-end: send query to a server-side Gemini endpoint (no API key on client).
+        // Replace '/api/gemini-search' with your own server route that queries Google Gemini.
+        // Server should handle API keys, rate limits, and return curated affordable options in the shape expected by renderResults().
 
         const form = document.getElementById('ai-search-form');
         const input = document.getElementById('ai-search-input');
@@ -656,11 +791,11 @@
             const query = input.value.trim();
             if (!query) return;
             const budget = budgetSelect.value || 'affordable';
-            resultsEl.innerHTML = '<div class="loading">Searching for affordable travel options... ✈️</div>';
+            resultsEl.innerHTML = '<div class="loading">Searching Google Gemini for travel options... ✈️</div>';
 
             try {
-                // Try server-side AI endpoint first
-                const resp = await fetch('/api/ai-travel-search', {
+                // Call your server-side Gemini proxy
+                const resp = await fetch('/api/gemini-search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query, budget, max_results: 6 })
@@ -668,7 +803,7 @@
 
                 if (!resp.ok) {
                     // server returned an error or endpoint not implemented -> fallback
-                    throw new Error('Server endpoint unavailable or returned an error');
+                    throw new Error('Server Gemini endpoint unavailable or returned an error');
                 }
 
                 const data = await resp.json();
@@ -677,7 +812,7 @@
                 renderResults(results);
             } catch (err) {
                 // Fallback to mock results (useful during local development)
-                console.warn('AI search failed, using mock results:', err);
+                console.warn('Gemini search failed, using mock results:', err);
                 const mock = mockSearch(query, budget);
                 renderResults(mock);
             }
@@ -689,7 +824,7 @@
          */
         function renderResults(items) {
             if (!items || items.length === 0) {
-                resultsEl.innerHTML = '<div class="error">No options found. Try a different query or check your server AI endpoint.</div>';
+                resultsEl.innerHTML = '<div class="error">No options found. Try a different query or check your server Gemini endpoint.</div>';
                 return;
             }
 
@@ -844,6 +979,184 @@
             }
 
             return filtered.slice(0, 6);
+        }
+
+        // ------------------------------
+        // Forum: localStorage + optional server sync (/api/comments)
+        // ------------------------------
+
+        const forumForm = document.getElementById('forum-form');
+        const forumName = document.getElementById('forum-name');
+        const forumComment = document.getElementById('forum-comment');
+        const commentsListEl = document.getElementById('comments-list');
+        const clearCommentsBtn = document.getElementById('clear-comments');
+        const forumSyncNote = document.getElementById('forum-sync-note');
+
+        const STORAGE_KEY = 'sb_comments_v1';
+
+        // Load and render comments on start
+        document.addEventListener('DOMContentLoaded', () => {
+            renderComments(loadComments());
+            checkCommentsEndpoint();
+        });
+
+        forumForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = (forumName.value || '').trim();
+            const text = (forumComment.value || '').trim();
+            if (!name || !text) return;
+
+            const comment = {
+                id: Date.now().toString(),
+                name,
+                text,
+                created_at: new Date().toISOString(),
+                synced: false
+            };
+
+            // Save locally first
+            const comments = loadComments();
+            comments.unshift(comment);
+            saveComments(comments);
+            renderComments(comments);
+            forumForm.reset();
+
+            // Try to POST to server-side /api/comments for persistence (optional)
+            try {
+                const res = await fetch('/api/comments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(comment)
+                });
+
+                if (res.ok) {
+                    // mark as synced in local storage
+                    markCommentSynced(comment.id);
+                    forumSyncNote.textContent = 'Comments synced to server.';
+                } else {
+                    forumSyncNote.textContent = 'Comment saved locally (server sync failed).';
+                }
+            } catch (err) {
+                // network/server not available
+                forumSyncNote.textContent = 'Comment saved locally. Server sync unavailable.';
+            }
+
+            setTimeout(() => { forumSyncNote.textContent = ''; }, 4000);
+        });
+
+        clearCommentsBtn.addEventListener('click', () => {
+            if (!confirm('Clear all local comments? This cannot be undone.')) return;
+            localStorage.removeItem(STORAGE_KEY);
+            renderComments([]);
+        });
+
+        function loadComments() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                return raw ? JSON.parse(raw) : [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function saveComments(list) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, 200))); // cap locally kept comments
+            } catch (e) {
+                console.warn('Failed to save comments', e);
+            }
+        }
+
+        function renderComments(list) {
+            commentsListEl.innerHTML = '';
+            if (!list || list.length === 0) {
+                commentsListEl.innerHTML = '<div class="comment-item">No comments yet — be the first to share ideas!</div>';
+                return;
+            }
+
+            list.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'comment-item';
+                item.setAttribute('data-id', c.id);
+
+                const meta = document.createElement('div');
+                meta.className = 'comment-meta';
+                const when = new Date(c.created_at).toLocaleString();
+                meta.textContent = `${sanitizeHTML(c.name)} • ${when}` + (c.synced ? ' • synced' : ' • local');
+
+                const text = document.createElement('div');
+                text.className = 'comment-text';
+                text.innerHTML = sanitizeHTML(c.text);
+
+                const actions = document.createElement('div');
+                actions.className = 'comment-actions';
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'small-btn';
+                delBtn.textContent = 'Delete';
+                delBtn.addEventListener('click', () => {
+                    deleteComment(c.id);
+                });
+
+                actions.appendChild(delBtn);
+
+                item.appendChild(meta);
+                item.appendChild(text);
+                item.appendChild(actions);
+
+                commentsListEl.appendChild(item);
+            });
+        }
+
+        function deleteComment(id) {
+            let list = loadComments();
+            list = list.filter(c => c.id !== id);
+            saveComments(list);
+            renderComments(list);
+
+            // optionally notify server to delete
+            fetch(`/api/comments/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            }).then(res => {
+                // ignore result; server endpoint optional
+            }).catch(() => {});
+        }
+
+        function markCommentSynced(id) {
+            const list = loadComments();
+            const idx = list.findIndex(c => c.id === id);
+            if (idx >= 0) {
+                list[idx].synced = true;
+                saveComments(list);
+                renderComments(list);
+            }
+        }
+
+        // Optional: try to fetch existing server comments and merge with local
+        async function checkCommentsEndpoint() {
+            try {
+                const res = await fetch('/api/comments');
+                if (!res.ok) {
+                    forumSyncNote.textContent = 'Server comments endpoint not available.';
+                    setTimeout(() => { forumSyncNote.textContent = ''; }, 3000);
+                    return;
+                }
+                const serverComments = await res.json(); // expect array
+                if (Array.isArray(serverComments) && serverComments.length) {
+                    // Merge: server comments first, then local unique by id
+                    const local = loadComments();
+                    const map = new Map();
+                    serverComments.forEach(c => map.set(c.id, Object.assign({}, c, { synced: true })));
+                    local.forEach(c => { if (!map.has(c.id)) map.set(c.id, c); });
+                    const merged = Array.from(map.values()).sort((a,b)=> (b.created_at||0) - (a.created_at||0));
+                    saveComments(merged);
+                    renderComments(merged);
+                    forumSyncNote.textContent = 'Loaded comments from server.';
+                    setTimeout(() => { forumSyncNote.textContent = ''; }, 3000);
+                }
+            } catch (err) {
+                // ignore — optional endpoint
+            }
         }
     </script>
 </body>
