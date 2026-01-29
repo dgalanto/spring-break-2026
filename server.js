@@ -27,6 +27,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
+// Serve static files (HTML, CSS, etc.)
+app.use(express.static(__dirname));
+
 // File-backed comments store
 const DATA_DIR = path.join(__dirname, 'data');
 const COMMENTS_FILE = path.join(DATA_DIR, 'comments.json');
@@ -116,6 +119,11 @@ app.delete('/api/comments/:id', async (req, res) => {
     }
     await saveComments(next);
     res.status(204).end();
+});
+
+// Serve index.htm at root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.htm'));
 });
 
 // --- Gemini proxy ---
