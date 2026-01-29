@@ -409,6 +409,128 @@
             color: #445;
             text-align: center;
         }
+
+        /* Trip Discussion Forum */
+        .forum-section {
+            margin-top: 40px;
+            border-top: 2px solid #e0f2f5;
+            padding-top: 30px;
+        }
+
+        .forum-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .forum-header h2 {
+            color: #2b8fb1;
+            margin: 0;
+        }
+
+        .forum-toggle {
+            font-size: 1.5em;
+            color: #2b8fb1;
+            transition: transform 0.3s;
+        }
+
+        .forum-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .forum-content {
+            display: block;
+        }
+
+        .forum-content.hidden {
+            display: none;
+        }
+
+        .comment-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .comment-form input,
+        .comment-form textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #cfeef6;
+            border-radius: 8px;
+            font-family: inherit;
+        }
+
+        .comment-form textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .comment-form button {
+            padding: 10px 20px;
+            background: linear-gradient(180deg, #2bb7c7 0%, #19a8b7 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .comments-list {
+            margin-top: 20px;
+        }
+
+        .comment {
+            background: white;
+            border: 1px solid #e0f2f5;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .comment-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .comment-author {
+            font-weight: 600;
+            color: #2b8fb1;
+        }
+
+        .comment-date {
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .comment-text {
+            color: #333;
+            line-height: 1.5;
+        }
+
+        .comment-delete {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.85em;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .no-comments {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
     </style>
 </head>
 <body>
@@ -639,6 +761,24 @@
             [{ "title": "Cancún, Mexico", "country":"Mexico", "price_estimate":350, "duration":"4 days", "highlights":["family-friendly","beach"], "booking_url":"https://..."}]
             The page will fall back to mock/sample data when no endpoint is available.
         </div>
+
+        <!-- Trip Discussion Forum -->
+        <div class="forum-section">
+            <div class="forum-header" onclick="toggleForum()">
+                <h2>💬 Trip Discussion Forum</h2>
+                <span class="forum-toggle" id="forum-toggle">▼</span>
+            </div>
+            <div class="forum-content" id="forum-content">
+                <div class="comment-form">
+                    <input type="text" id="comment-author" placeholder="Your name" required />
+                    <textarea id="comment-text" placeholder="Share your thoughts, suggestions, or questions about the trip..." required></textarea>
+                    <button onclick="addComment()">Post Comment</button>
+                </div>
+                <div class="comments-list" id="comments-list">
+                    <div class="no-comments">No comments yet. Be the first to share your thoughts!</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -659,11 +799,11 @@
             resultsEl.innerHTML = '<div class="loading">Searching for affordable travel options... ✈️</div>';
 
             try {
-                // Try server-side AI endpoint first
-                const resp = await fetch('/api/ai-travel-search', {
+                // Try server-side Gemini endpoint first
+                const resp = await fetch('/api/gemini-search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, budget, max_results: 6 })
+                    body: JSON.stringify({ query, tripType: budget })
                 });
 
                 if (!resp.ok) {
@@ -672,9 +812,16 @@
                 }
 
                 const data = await resp.json();
-                // Expecting: { results: [ { title, country, price_estimate, duration, highlights, booking_url } ] }
-                const results = Array.isArray(data.results) ? data.results : data;
-                renderResults(results);
+                // Expecting: { results: [ { name, description, type, estimatedCost } ] }
+                const results = Array.isArray(data.results) ? data.results : [];
+                // Convert Gemini results to display format
+                const displayResults = results.map(item => ({
+                    title: item.name || 'Unknown destination',
+                    description: item.description || '',
+                    price_estimate: item.estimatedCost || 'Varies',
+                    highlights: item.type ? [item.type] : []
+                }));
+                renderResults(displayResults);
             } catch (err) {
                 // Fallback to mock results (useful during local development)
                 console.warn('AI search failed, using mock results:', err);
@@ -845,6 +992,178 @@
 
             return filtered.slice(0, 6);
         }
+
+        // Trip Discussion Forum Functions
+        let comments = [];
+
+        // Load comments from localStorage and attempt to sync with server
+        async function loadComments() {
+            // Try to load from server first
+            try {
+                const response = await fetch('/api/comments');
+                if (response.ok) {
+                    const serverComments = await response.json();
+                    comments = serverComments;
+                    localStorage.setItem('tripComments', JSON.stringify(comments));
+                }
+            } catch (error) {
+                console.log('Could not load comments from server, using localStorage');
+            }
+
+            // Fallback to localStorage if server fails
+            if (comments.length === 0) {
+                const stored = localStorage.getItem('tripComments');
+                if (stored) {
+                    comments = JSON.parse(stored);
+                }
+            }
+
+            renderComments();
+        }
+
+        // Save comments to localStorage and sync to server
+        async function saveComments() {
+            localStorage.setItem('tripComments', JSON.stringify(comments));
+            
+            // Try to sync with server (but don't fail if it's not available)
+            try {
+                // Note: Full sync would require more complex logic
+                // For now, we just ensure localStorage is updated
+            } catch (error) {
+                console.log('Could not sync with server');
+            }
+        }
+
+        // Add a new comment
+        async function addComment() {
+            const authorInput = document.getElementById('comment-author');
+            const textInput = document.getElementById('comment-text');
+            
+            const author = authorInput.value.trim();
+            const text = textInput.value.trim();
+            
+            if (!author || !text) {
+                alert('Please enter both your name and a comment');
+                return;
+            }
+
+            const newComment = {
+                id: Date.now().toString(),
+                author,
+                text,
+                timestamp: new Date().toISOString()
+            };
+
+            // Try to post to server
+            try {
+                const response = await fetch('/api/comments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ author, text })
+                });
+
+                if (response.ok) {
+                    const serverComment = await response.json();
+                    comments.push(serverComment);
+                } else {
+                    // Fallback to local storage only
+                    comments.push(newComment);
+                }
+            } catch (error) {
+                console.log('Could not post to server, saving locally');
+                comments.push(newComment);
+            }
+
+            await saveComments();
+            renderComments();
+            
+            // Clear form
+            authorInput.value = '';
+            textInput.value = '';
+        }
+
+        // Delete a comment
+        async function deleteComment(id) {
+            if (!confirm('Are you sure you want to delete this comment?')) {
+                return;
+            }
+
+            // Try to delete from server
+            try {
+                const response = await fetch(`/api/comments/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    comments = comments.filter(c => c.id !== id);
+                } else {
+                    // Fallback to local deletion
+                    comments = comments.filter(c => c.id !== id);
+                }
+            } catch (error) {
+                console.log('Could not delete from server, deleting locally');
+                comments = comments.filter(c => c.id !== id);
+            }
+
+            await saveComments();
+            renderComments();
+        }
+
+        // Render comments to the page
+        function renderComments() {
+            const listEl = document.getElementById('comments-list');
+            
+            if (comments.length === 0) {
+                listEl.innerHTML = '<div class="no-comments">No comments yet. Be the first to share your thoughts!</div>';
+                return;
+            }
+
+            listEl.innerHTML = '';
+            comments.slice().reverse().forEach(comment => {
+                const commentDiv = document.createElement('div');
+                commentDiv.className = 'comment';
+                
+                const date = new Date(comment.timestamp);
+                const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                
+                commentDiv.innerHTML = `
+                    <div class="comment-header">
+                        <span class="comment-author">${escapeHtml(comment.author)}</span>
+                        <span class="comment-date">${dateStr}</span>
+                    </div>
+                    <div class="comment-text">${escapeHtml(comment.text)}</div>
+                    <button class="comment-delete" onclick="deleteComment('${comment.id}')">Delete</button>
+                `;
+                
+                listEl.appendChild(commentDiv);
+            });
+        }
+
+        // Toggle forum visibility
+        function toggleForum() {
+            const content = document.getElementById('forum-content');
+            const toggle = document.getElementById('forum-toggle');
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                toggle.classList.remove('collapsed');
+            } else {
+                content.classList.add('hidden');
+                toggle.classList.add('collapsed');
+            }
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load comments when page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            loadComments();
+        });
     </script>
 </body>
 </html>
