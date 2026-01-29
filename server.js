@@ -256,6 +256,7 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`spring-break-server listening on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`spring-break-server listening on port ${PORT} (bound to 0.0.0.0 for device access)`);
+  console.log('NOTE: For production, consider restricting CORS origin and binding to specific interface.');
 });
