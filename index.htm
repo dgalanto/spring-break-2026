@@ -508,12 +508,10 @@
         </div>
 
         <div class="search-meta">
-            Results use an AI-powered search (client makes request to your server-side AI endpoint). If no endpoint is configured the page will show sample/mock affordable options.
+            Results use an AI-powered search (server proxy to Google Custom Search). If the server is not configured or unreachable the client will open a Google search in a new tab and show local sample options.
         </div>
 
         <div id="search-results" aria-live="polite" aria-atomic="true"></div>
-
-
 
 <script src="https://giscus.app/client.js"
         data-repo="dgalanto/spring-break-2026"
@@ -532,7 +530,7 @@
 </script>
         
         <div class="calendar">
-            <h2>��� March 2026 Calendar</h2>
+            <h2>March 2026 Calendar</h2>
             <table>
                 <thead>
                     <tr>
@@ -719,11 +717,27 @@
                 <label><input type="checkbox"> Confirm all reservations</label>
             </div>
         </div>
+
+        <!-- Optional simple forum area (local-first) -->
+        <div class="forum">
+            <h2>💬 Forum</h2>
+            <div class="forum-note">Share ideas — posts are saved locally and will attempt to sync if a server endpoint exists.</div>
+            <form id="forum-form" class="forum-form" aria-label="Forum form">
+                <input id="forum-name" type="text" placeholder="Your name" />
+                <textarea id="forum-comment" placeholder="Share a thought..."></textarea>
+                <div class="forum-actions">
+                    <button id="forum-submit" class="small-btn" type="submit">Post</button>
+                    <button id="clear-comments" type="button" class="small-btn">Clear</button>
+                </div>
+            </form>
+            <div id="forum-sync-note" class="forum-note"></div>
+            <div id="comments-list" class="comments-list"></div>
+        </div>
     </div>
 
     <!-- AI search script (client-side) -->
     <script>
-        // Front-end: AI search and mock fallback (kept same as prior implementation)
+        // Front-end: AI search with server proxy fallback to Google + fixed mock fallback
         const form = document.getElementById('ai-search-form');
         const input = document.getElementById('ai-search-input');
         const budgetSelect = document.getElementById('ai-budget');
@@ -731,10 +745,10 @@
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const query = input.value.trim();
+            const query = (input.value || '').trim();
             if (!query) return;
             const budget = budgetSelect.value || 'affordable';
-            resultsEl.innerHTML = '<div class="loading">Searching for affordable travel options... ✈️</div>';
+            resultsEl.innerHTML = '<div class="loading">Searching for travel options... ✈️</div>';
 
             try {
                 const resp = await fetch('/api/ai-travel-search', {
@@ -744,14 +758,23 @@
                 });
 
                 if (!resp.ok) {
-                    throw new Error('Server endpoint unavailable or returned an error');
+                    // if proxy responds with non-OK, throw to trigger fallback
+                    const body = await resp.text().catch(() => '');
+                    throw new Error(`Proxy error: ${resp.status} ${body}`);
                 }
 
                 const data = await resp.json();
-                const results = Array.isArray(data.results) ? data.results : data;
+                const results = Array.isArray(data) ? data : (Array.isArray(data.results) ? data.results : []);
                 renderResults(results);
+                return;
             } catch (err) {
-                console.warn('AI search failed, using mock results:', err);
+                console.warn('Search proxy failed:', err);
+                // Fallback behavior:
+                // 1) Open a Google search in a new tab so the user sees live web results
+                const googleQuery = `${query} ${budget === 'affordable' ? 'budget' : budget}`;
+                try { window.open('https://www.google.com/search?q=' + encodeURIComponent(googleQuery), '_blank'); } catch (e) { /* ignore */ }
+
+                // 2) Render a local mock set so the page still shows suggestions
                 const mock = mockSearch(query, budget);
                 renderResults(mock);
             }
@@ -822,7 +845,7 @@
 
                 card.appendChild(header);
                 card.appendChild(sub);
-                if (body.textContent.trim()) card.appendChild(body);
+                if (body.textContent && body.textContent.trim()) card.appendChild(body);
                 if (highlights.children.length) card.appendChild(highlights);
                 card.appendChild(actions);
 
@@ -839,19 +862,19 @@
 
         function mockSearch(query, budget) {
             const affordable = [
-                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_url: 'https://www.example.com/book/myrtle-beach', info_url: 'https://en.wikipedia.org/wiki/Myrtle_Beach' },
-                { title: 'Cancún (budget package)', country: 'Mexico', price_estimate: 450, duration: '5 days', highlights: ['all-inclusive deals', 'beach', 'warm weather'], booking_url: 'https://www.example.com/book/cancun', info_url: 'https://en.wikipedia.org/wiki/Canc%C3%BAn' },
-                { title: 'Gulf Shores, Alabama', country: 'USA', price_estimate: 290, duration: '3 days', highlights: ['short drive', 'affordable rentals', 'family-centred'], booking_url: 'https://www.example.com/book/gulf-shores', info_url: 'https://en.wikipedia.org/wiki/Gulf_Shores,_Alabama' },
-                { title: 'Puerto Vallarta (flight deals)', country: 'Mexico', price_estimate: 420, duration: '5 days', highlights: ['cheap flights', 'beach & culture', 'food'], booking_url: 'https://www.example.com/book/puerto-vallarta', info_url: 'https://en.wikipedia.org/wiki/Puerto_Vallarta' },
-                { title: 'San Diego, California (deal hotels)', country: 'USA', price_estimate: 380, duration: '4 days', highlights: ['mild weather', 'family activities', 'beach'], booking_url: 'https://www.example.com/book/san-diego', info_url: 'https://en.wikipedia.org/wiki/San_Diego' },
-                { title: 'Fort Lauderdale (flight+hotel)', country: 'USA', price_estimate: 340, duration: '4 days', highlights: ['beach', 'easy flights', 'budget-friendly'], booking_url: 'https://www.example.com/book/ft-lauderdale', info_url: 'https://en.wikipedia.org/wiki/Fort_Lauderdale,_Florida' }
+                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_url: 'https://example.com/myrtle' },
+                { title: 'Cancún (budget package)', country: 'Mexico', price_estimate: 450, duration: '5 days', highlights: ['all-inclusive deals', 'beach', 'warm weather'], booking_url: 'https://example.com/cancun' },
+                { title: 'Gulf Shores, Alabama', country: 'USA', price_estimate: 290, duration: '3 days', highlights: ['short drive', 'affordable rentals', 'family-centred'], booking_url: 'https://example.com/gulfshores' },
+                { title: 'Puerto Vallarta (flight deals)', country: 'Mexico', price_estimate: 420, duration: '5 days', highlights: ['cheap flights', 'beach & culture', 'food'], booking_url: 'https://example.com/pv' },
+                { title: 'San Diego, California (deal hotels)', country: 'USA', price_estimate: 380, duration: '4 days', highlights: ['mild weather', 'family activities', 'beach'], booking_url: 'https://example.com/sandiego' },
+                { title: 'Fort Lauderdale (flight+hotel)', country: 'USA', price_estimate: 340, duration: '4 days', highlights: ['beach', 'easy flights', 'budget-friendly'], booking_url: 'https://example.com/ftlauderdale' }
             ];
 
             const q = (query || '').toLowerCase();
             const filtered = affordable.filter(item =>
                 item.title.toLowerCase().includes(q) ||
-                item.highlights.join(' ').toLowerCase().includes(q) ||
-                item.country.toLowerCase().includes(q) ||
+                (item.highlights || []).join(' ').toLowerCase().includes(q) ||
+                (item.country || '').toLowerCase().includes(q) ||
                 q === ''
             );
 
@@ -863,10 +886,10 @@
         }
     </script>
 
-    <!-- Forum client debug script: supports window.API_BASE and surfaces server/GitHub errors. -->
+    <!-- Minimal forum sync script (local-first; attempts to POST to /api/comments if available) -->
     <script>
     (function () {
-      const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : (location.protocol === 'file:' ? 'http://localhost:3000' : '');
+      const API_BASE = '';
       const forumForm = document.getElementById('forum-form');
       const forumName = document.getElementById('forum-name');
       const forumComment = document.getElementById('forum-comment');
@@ -874,77 +897,6 @@
       const clearCommentsBtn = document.getElementById('clear-comments');
       const forumSyncNote = document.getElementById('forum-sync-note');
       const STORAGE_KEY = 'sb_comments_v1';
-
-      function apiUrl(path) {
-        if (!API_BASE) return path;
-        return API_BASE.replace(/\/$/, '') + path;
-      }
-
-      document.addEventListener('DOMContentLoaded', () => {
-        renderComments(loadComments());
-        checkCommentsEndpoint({ silent: false });
-        setInterval(() => checkCommentsEndpoint({ silent: true }), 10000);
-      });
-
-      forumForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const name = (forumName.value || '').trim();
-        const text = (forumComment.value || '').trim();
-        if (!name || !text) {
-          forumSyncNote.textContent = 'Name and comment required.';
-          setTimeout(()=>forumSyncNote.textContent='',3000);
-          return;
-        }
-
-        const tempId = Date.now().toString();
-        const tempComment = { id: tempId, name, text, created_at: new Date().toISOString(), synced: false };
-
-        const comments = loadComments();
-        comments.unshift(tempComment);
-        saveComments(comments);
-        renderComments(comments);
-        forumForm.reset();
-
-        try {
-          const res = await fetch(apiUrl('/api/comments'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: tempComment.name, text: tempComment.text }),
-            credentials: 'include'
-          });
-
-          if (!res.ok) {
-            let body = null;
-            try { body = await res.json(); } catch (e) { /* ignore */ }
-            const detail = body && (body.github || body.detail) ? JSON.stringify(body.github || body.detail) : `status ${res.status}`;
-            forumSyncNote.textContent = `Server save failed: ${detail}`;
-            console.warn('POST /api/comments failed', res.status, body);
-            setTimeout(()=>forumSyncNote.textContent='',8000);
-            return;
-          }
-
-          const saved = await res.json();
-          const after = loadComments();
-          const idx = after.findIndex(c => c.id === tempId);
-          const serverItem = Object.assign({}, saved, { synced: true });
-          if (idx >= 0) after[idx] = serverItem; else after.unshift(serverItem);
-          saveComments(after);
-          renderComments(after);
-
-          forumSyncNote.textContent = 'Comment synced to server.';
-          setTimeout(()=>forumSyncNote.textContent='',3000);
-        } catch (err) {
-          console.error('Network/Fetch error posting comment:', err);
-          forumSyncNote.textContent = `Comment saved locally. Server sync unavailable: ${err && err.message ? err.message : err}`;
-          setTimeout(()=>forumSyncNote.textContent='',6000);
-        }
-      });
-
-      clearCommentsBtn.addEventListener('click', () => {
-        if (!confirm('Clear all local comments? This cannot be undone.')) return;
-        localStorage.removeItem(STORAGE_KEY);
-        renderComments([]);
-      });
 
       function loadComments() {
         try {
@@ -955,6 +907,13 @@
 
       function saveComments(list) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0,200))); } catch (e) { console.warn('Failed to save comments', e); }
+      }
+
+      function sanitizeHTML(str) {
+        if (!str) return '';
+        const tmp = document.createElement('div');
+        tmp.textContent = str;
+        return tmp.innerHTML;
       }
 
       function renderComments(list) {
@@ -983,55 +942,64 @@
         list = list.filter(c => c.id !== id);
         saveComments(list);
         renderComments(list);
-        const isServerId = String(id).startsWith('srv_');
-        if (isServerId) {
-          fetch(apiUrl(`/api/comments/${encodeURIComponent(id)}`), { method: 'DELETE', credentials: 'include' })
-            .then(res => {
-              if (!res.ok) console.warn('Server delete returned', res.status);
-            }).catch(err => console.warn('Failed delete request', err));
-        }
       }
 
-      async function checkCommentsEndpoint({ silent = true } = {}) {
-        try {
-          const res = await fetch(apiUrl('/api/comments'), { credentials: 'include' });
-          if (!res.ok) {
-            if (!silent) {
-              let body = null;
-              try { body = await res.json(); } catch (e) { /* ignore */ }
-              const detail = body && (body.github || body.detail) ? JSON.stringify(body.github || body.detail) : `status ${res.status}`;
-              forumSyncNote.textContent = `Server comments endpoint not available: ${detail}`;
-              console.warn('GET /api/comments failed', res.status, body);
-              setTimeout(()=>forumSyncNote.textContent='',7000);
-            }
+      if (forumForm) {
+        renderComments(loadComments());
+
+        forumForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const name = (forumName.value || '').trim();
+          const text = (forumComment.value || '').trim();
+          if (!name || !text) {
+            forumSyncNote.textContent = 'Name and comment required.';
+            setTimeout(()=>forumSyncNote.textContent='',3000);
             return;
           }
-          const serverComments = await res.json();
-          if (Array.isArray(serverComments)) {
-            const local = loadComments();
-            const map = new Map();
-            serverComments.forEach(c => map.set(c.id, Object.assign({}, c, { synced: true })));
-            local.forEach(c => { if (!map.has(c.id)) map.set(c.id, c); });
-            const merged = Array.from(map.values()).sort((a,b)=> (b.created_at||0)-(a.created_at||0));
-            saveComments(merged);
-            renderComments(merged);
-            if (!silent) { forumSyncNote.textContent = 'Loaded comments from server.'; setTimeout(()=>forumSyncNote.textContent='',3000); }
+
+          const tempId = Date.now().toString();
+          const tempComment = { id: tempId, name, text, created_at: new Date().toISOString(), synced: false };
+
+          const comments = loadComments();
+          comments.unshift(tempComment);
+          saveComments(comments);
+          renderComments(comments);
+          forumForm.reset();
+
+          // Try to sync to server endpoint if available
+          try {
+            const res = await fetch('/api/comments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: tempComment.name, text: tempComment.text }),
+              credentials: 'include'
+            });
+
+            if (!res.ok) {
+              throw new Error('Server save failed');
+            }
+
+            const saved = await res.json();
+            const after = loadComments();
+            const idx = after.findIndex(c => c.id === tempId);
+            const serverItem = Object.assign({}, saved, { synced: true });
+            if (idx >= 0) after[idx] = serverItem; else after.unshift(serverItem);
+            saveComments(after);
+            renderComments(after);
+            forumSyncNote.textContent = 'Comment synced to server.';
+            setTimeout(()=>forumSyncNote.textContent='',3000);
+          } catch (err) {
+            forumSyncNote.textContent = 'Comment saved locally (server sync unavailable).';
+            setTimeout(()=>forumSyncNote.textContent='',3000);
           }
-        } catch (err) {
-          console.error('Error checking comments endpoint:', err);
-          if (!silent) { forumSyncNote.textContent = `Server unreachable: ${err && err.message ? err.message : err}`; setTimeout(()=>forumSyncNote.textContent='',7000); }
-        }
-      }
+        });
 
-      function sanitizeHTML(str) {
-        if (!str) return '';
-        const tmp = document.createElement('div');
-        tmp.textContent = str;
-        return tmp.innerHTML;
+        clearCommentsBtn.addEventListener('click', () => {
+          if (!confirm('Clear all local comments? This cannot be undone.')) return;
+          localStorage.removeItem(STORAGE_KEY);
+          renderComments([]);
+        });
       }
-
-      window.sb_checkCommentsEndpoint = checkCommentsEndpoint;
-      window.sb_apiUrl = apiUrl;
     })();
     </script>
 </body>
