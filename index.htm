@@ -633,17 +633,62 @@
         </div>
 
         <div class="api-note">
-            To enable real AI results: implement a server endpoint (e.g. POST /api/ai-travel-search). The endpoint should accept a JSON body:
+            To enable real AI results: implement a server endpoint (e.g. POST /api/gemini-search). The endpoint should accept a JSON body:
             { "query": "...", "budget": "affordable|moderate|luxury" }
             and return an array of result objects:
             [{ "title": "Cancún, Mexico", "country":"Mexico", "price_estimate":350, "duration":"4 days", "highlights":["family-friendly","beach"], "booking_url":"https://..."}]
             The page will fall back to mock/sample data when no endpoint is available.
+        
+        <!-- Trip Discussion Forum (Collapsible) -->
+        <div class="discussion-forum" style="margin-top: 40px;">
+            <h2 style="color: #2b8fb1; cursor: pointer; display: flex; align-items: center; justify-content: space-between;" id="forum-toggle">
+                <span>💬 Trip Discussion Forum</span>
+                <span id="forum-arrow" style="transition: transform 0.3s;">▼</span>
+            </h2>
+            <div id="forum-content" style="display: block;">
+                <p style="color: #666; margin-bottom: 20px;">Share your thoughts, questions, and ideas about the trip!</p>
+                
+                <div class="comment-form" style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <form id="comment-form">
+                        <div style="margin-bottom: 15px;">
+                            <input 
+                                type="text" 
+                                id="commenter-name" 
+                                placeholder="Your Name" 
+                                required
+                                style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #cfeef6; background: white; font-size: 1em;"
+                            />
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <textarea 
+                                id="comment-text" 
+                                placeholder="Share your thoughts..." 
+                                required
+                                rows="4"
+                                style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #cfeef6; background: white; font-size: 1em; resize: vertical;"
+                            ></textarea>
+                        </div>
+                        <button 
+                            type="submit"
+                            style="padding: 12px 24px; background: linear-gradient(180deg, #2bb7c7 0%, #19a8b7 100%); color: white; border: none; border-radius: 10px; font-weight: 600; cursor: pointer;"
+                        >
+                            Post Comment
+                        </button>
+                    </form>
+                </div>
+
+                <div id="comments-list" style="margin-top: 20px;">
+                    <!-- Comments will be loaded here -->
+                </div>
+            </div>
         </div>
+
+</div>
     </div>
 
     <script>
         // Front-end: send query to a server-side AI endpoint (no API key on client).
-        // Replace '/api/ai-travel-search' with your own server route that queries your preferred AI (OpenAI/others)
+        // Replace '/api/gemini-search' with your own server route that queries your preferred AI (OpenAI/others)
         // Server should handle rate limits, API keys, and return curated affordable options.
 
         const form = document.getElementById('ai-search-form');
@@ -660,7 +705,7 @@
 
             try {
                 // Try server-side AI endpoint first
-                const resp = await fetch('/api/ai-travel-search', {
+                const resp = await fetch('/api/gemini-search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query, budget, max_results: 6 })
@@ -845,6 +890,169 @@
 
             return filtered.slice(0, 6);
         }
-    </script>
+    
+        // Trip Discussion Forum functionality
+        (function() {
+            const forumToggle = document.getElementById('forum-toggle');
+            const forumContent = document.getElementById('forum-content');
+            const forumArrow = document.getElementById('forum-arrow');
+            const commentForm = document.getElementById('comment-form');
+            const commenterName = document.getElementById('commenter-name');
+            const commentText = document.getElementById('comment-text');
+            const commentsList = document.getElementById('comments-list');
+
+            let useLocalStorage = false;
+            const LOCAL_STORAGE_KEY = 'spring-break-comments';
+
+            // Toggle forum visibility
+            forumToggle.addEventListener('click', () => {
+                const isHidden = forumContent.style.display === 'none';
+                forumContent.style.display = isHidden ? 'block' : 'none';
+                forumArrow.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(-90deg)';
+            });
+
+            // Load comments on page load
+            loadComments();
+
+            // Handle form submission
+            commentForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = commenterName.value.trim();
+                const text = commentText.value.trim();
+                
+                if (!name || !text) return;
+
+                const comment = {
+                    id: Date.now().toString(),
+                    name: sanitizeInput(name),
+                    text: sanitizeInput(text),
+                    created_at: new Date().toISOString()
+                };
+
+                try {
+                    // Try to post to server
+                    const resp = await fetch('/api/comments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(comment)
+                    });
+
+                    if (!resp.ok) throw new Error('Server error');
+                    
+                    const savedComment = await resp.json();
+                    addCommentToUI(savedComment);
+                    commentForm.reset();
+                    
+                } catch (err) {
+                    console.warn('Failed to post to server, using localStorage:', err);
+                    useLocalStorage = true;
+                    saveCommentLocal(comment);
+                    addCommentToUI(comment);
+                    commentForm.reset();
+                }
+            });
+
+            async function loadComments() {
+                try {
+                    const resp = await fetch('/api/comments');
+                    if (!resp.ok) throw new Error('Server error');
+                    
+                    const comments = await resp.json();
+                    renderComments(comments);
+                } catch (err) {
+                    console.warn('Failed to load from server, using localStorage:', err);
+                    useLocalStorage = true;
+                    const localComments = loadCommentsLocal();
+                    renderComments(localComments);
+                }
+            }
+
+            function renderComments(comments) {
+                commentsList.innerHTML = '';
+                if (!comments || comments.length === 0) {
+                    commentsList.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">No comments yet. Be the first to share!</p>';
+                    return;
+                }
+
+                comments.forEach(comment => addCommentToUI(comment));
+            }
+
+            function addCommentToUI(comment) {
+                const commentEl = document.createElement('div');
+                commentEl.style.cssText = 'background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #e6f7f9;';
+                
+                const header = document.createElement('div');
+                header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;';
+                
+                const nameEl = document.createElement('strong');
+                nameEl.style.color = '#0f3740';
+                nameEl.textContent = comment.name;
+                
+                const dateEl = document.createElement('span');
+                dateEl.style.cssText = 'color: #999; font-size: 0.9em;';
+                dateEl.textContent = formatDate(comment.created_at);
+                
+                header.appendChild(nameEl);
+                header.appendChild(dateEl);
+                
+                const textEl = document.createElement('p');
+                textEl.style.cssText = 'color: #333; line-height: 1.5; margin: 0;';
+                textEl.textContent = comment.text;
+                
+                commentEl.appendChild(header);
+                commentEl.appendChild(textEl);
+                
+                // Insert at the beginning
+                if (commentsList.firstChild && commentsList.firstChild.tagName !== 'P') {
+                    commentsList.insertBefore(commentEl, commentsList.firstChild);
+                } else {
+                    commentsList.innerHTML = '';
+                    commentsList.appendChild(commentEl);
+                }
+            }
+
+            function saveCommentLocal(comment) {
+                const comments = loadCommentsLocal();
+                comments.unshift(comment);
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(comments));
+            }
+
+            function loadCommentsLocal() {
+                try {
+                    const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+                    return data ? JSON.parse(data) : [];
+                } catch (err) {
+                    console.error('Failed to load from localStorage:', err);
+                    return [];
+                }
+            }
+
+            function formatDate(isoString) {
+                if (!isoString) return '';
+                const date = new Date(isoString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins}m ago`;
+                
+                const diffHours = Math.floor(diffMins / 60);
+                if (diffHours < 24) return `${diffHours}h ago`;
+                
+                const diffDays = Math.floor(diffHours / 24);
+                if (diffDays < 7) return `${diffDays}d ago`;
+                
+                return date.toLocaleDateString();
+            }
+
+            function sanitizeInput(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+        })();
+
+</script>
 </body>
 </html>
