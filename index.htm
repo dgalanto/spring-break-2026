@@ -508,13 +508,37 @@
         </div>
 
         <div class="search-meta">
-            Results use an AI-powered search . If no endpoint is configured the page will show sample/mock affordable options.
+            Results use an AI-powered search (client makes request to your server-side AI endpoint). If no endpoint is configured the page will show sample/mock affordable options.
         </div>
 
         <div id="search-results" aria-live="polite" aria-atomic="true"></div>
 
+        <!-- Forum section (moved up - placed before the calendar) -->
+        <div class="forum">
+            <h2>Community Forum</h2>
+            <div class="forum-note">Leave a comment. Comments are saved locally and synced to the server when available.</div>
+
+            <form id="forum-form" class="forum-form" aria-label="Forum form">
+                <input id="forum-name" type="text" placeholder="Your name" required />
+                <textarea id="forum-comment" placeholder="Your comment" required></textarea>
+                <div class="forum-actions">
+                    <button type="submit" class="small-btn">Post</button>
+                    <button type="button" id="clear-comments" class="small-btn">Clear Local</button>
+                </div>
+            </form>
+
+            <div id="forum-sync-note" class="forum-footer"></div>
+
+            <div id="comments-list" class="comments-list"></div>
+
+            <div class="api-note">
+                If your static site and API are on different hosts, set the API host by adding before the forum script:
+                <br/><code>&lt;script&gt;window.API_BASE = 'https://api.yourdomain.com';&lt;/script&gt;</code>
+            </div>
+        </div>
+
         <div class="calendar">
-            <h2>📅 March 2026 Calendar</h2>
+            <h2>��� March 2026 Calendar</h2>
             <table>
                 <thead>
                     <tr>
@@ -701,41 +725,152 @@
                 <label><input type="checkbox"> Confirm all reservations</label>
             </div>
         </div>
-
-        <!-- Forum section -->
-        <div class="forum">
-            <h2>Community Forum</h2>
-            <div class="forum-note">Leave a comment. Comments are saved locally and synced to the server when available.</div>
-
-            <form id="forum-form" class="forum-form" aria-label="Forum form">
-                <input id="forum-name" type="text" placeholder="Your name" required />
-                <textarea id="forum-comment" placeholder="Your comment" required></textarea>
-                <div class="forum-actions">
-                    <button type="submit" class="small-btn">Post</button>
-                    <button type="button" id="clear-comments" class="small-btn">Clear Local</button>
-                </div>
-            </form>
-
-            <div id="forum-sync-note" class="forum-footer"></div>
-
-            <div id="comments-list" class="comments-list"></div>
-
-            <div class="api-note">
-                If your static site and API are on different hosts, set the API host by adding before the forum script:
-                <br/><code>&lt;script&gt;window.API_BASE = 'https://api.yourdomain.com';&lt;/script&gt;</code>
-            </div>
-        </div>
     </div>
 
-    <!-- Client scripts: AI search + forum + debug-friendly client -->
+    <!-- AI search script (client-side) -->
     <script>
-        // AI search front-end (unchanged from earlier; mock fallback included)
-        // For brevity in this bundle the AI-search code is omitted here.
-        // (Keep the AI search script you previously added if desired.)
+        // Front-end: AI search and mock fallback (kept same as prior implementation)
+        const form = document.getElementById('ai-search-form');
+        const input = document.getElementById('ai-search-input');
+        const budgetSelect = document.getElementById('ai-budget');
+        const resultsEl = document.getElementById('search-results');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = input.value.trim();
+            if (!query) return;
+            const budget = budgetSelect.value || 'affordable';
+            resultsEl.innerHTML = '<div class="loading">Searching for affordable travel options... ✈️</div>';
+
+            try {
+                const resp = await fetch('/api/ai-travel-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, budget, max_results: 6 })
+                });
+
+                if (!resp.ok) {
+                    throw new Error('Server endpoint unavailable or returned an error');
+                }
+
+                const data = await resp.json();
+                const results = Array.isArray(data.results) ? data.results : data;
+                renderResults(results);
+            } catch (err) {
+                console.warn('AI search failed, using mock results:', err);
+                const mock = mockSearch(query, budget);
+                renderResults(mock);
+            }
+        });
+
+        function renderResults(items) {
+            if (!items || items.length === 0) {
+                resultsEl.innerHTML = '<div class="error">No options found. Try a different query or check your server AI endpoint.</div>';
+                return;
+            }
+            resultsEl.innerHTML = '';
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+
+                const title = document.createElement('div');
+                title.className = 'result-title';
+                title.textContent = item.title || 'Unknown destination';
+
+                const sub = document.createElement('div');
+                sub.className = 'result-sub';
+                sub.textContent = item.country ? item.country + (item.duration ? ' • ' + item.duration : '') : (item.duration || '');
+
+                const header = document.createElement('div');
+                header.className = 'result-header';
+                header.appendChild(title);
+
+                const price = document.createElement('div');
+                price.className = 'price';
+                price.textContent = (typeof item.price_estimate === 'number') ? `$${item.price_estimate}` : (item.price_estimate || 'Varies');
+
+                header.appendChild(price);
+
+                const body = document.createElement('div');
+                body.className = 'result-body';
+                body.innerHTML = item.description ? sanitizeHTML(item.description) : (item.highlights ? 'Highlights:' : '');
+
+                const highlights = document.createElement('div');
+                highlights.className = 'result-highlights';
+                if (Array.isArray(item.highlights)) {
+                    item.highlights.slice(0,6).forEach(h => {
+                        const b = document.createElement('div');
+                        b.className = 'badge';
+                        b.textContent = h;
+                        highlights.appendChild(b);
+                    });
+                }
+
+                const actions = document.createElement('div');
+                actions.className = 'result-actions';
+
+                const more = document.createElement('a');
+                more.className = 'btn-link';
+                more.target = '_blank';
+                more.rel = 'noopener noreferrer';
+                more.href = item.info_url || item.booking_url || '#';
+                more.textContent = 'More Info';
+
+                const book = document.createElement('a');
+                book.className = 'btn-book';
+                book.target = '_blank';
+                book.rel = 'noopener noreferrer';
+                book.href = item.booking_url || item.info_url || '#';
+                book.textContent = 'Book';
+
+                actions.appendChild(more);
+                actions.appendChild(book);
+
+                card.appendChild(header);
+                card.appendChild(sub);
+                if (body.textContent.trim()) card.appendChild(body);
+                if (highlights.children.length) card.appendChild(highlights);
+                card.appendChild(actions);
+
+                resultsEl.appendChild(card);
+            });
+        }
+
+        function sanitizeHTML(str) {
+            if (!str) return '';
+            const tmp = document.createElement('div');
+            tmp.textContent = str;
+            return tmp.innerHTML;
+        }
+
+        function mockSearch(query, budget) {
+            const affordable = [
+                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_url: 'https://www.example.com/book/myrtle-beach', info_url: 'https://en.wikipedia.org/wiki/Myrtle_Beach' },
+                { title: 'Cancún (budget package)', country: 'Mexico', price_estimate: 450, duration: '5 days', highlights: ['all-inclusive deals', 'beach', 'warm weather'], booking_url: 'https://www.example.com/book/cancun', info_url: 'https://en.wikipedia.org/wiki/Canc%C3%BAn' },
+                { title: 'Gulf Shores, Alabama', country: 'USA', price_estimate: 290, duration: '3 days', highlights: ['short drive', 'affordable rentals', 'family-centred'], booking_url: 'https://www.example.com/book/gulf-shores', info_url: 'https://en.wikipedia.org/wiki/Gulf_Shores,_Alabama' },
+                { title: 'Puerto Vallarta (flight deals)', country: 'Mexico', price_estimate: 420, duration: '5 days', highlights: ['cheap flights', 'beach & culture', 'food'], booking_url: 'https://www.example.com/book/puerto-vallarta', info_url: 'https://en.wikipedia.org/wiki/Puerto_Vallarta' },
+                { title: 'San Diego, California (deal hotels)', country: 'USA', price_estimate: 380, duration: '4 days', highlights: ['mild weather', 'family activities', 'beach'], booking_url: 'https://www.example.com/book/san-diego', info_url: 'https://en.wikipedia.org/wiki/San_Diego' },
+                { title: 'Fort Lauderdale (flight+hotel)', country: 'USA', price_estimate: 340, duration: '4 days', highlights: ['beach', 'easy flights', 'budget-friendly'], booking_url: 'https://www.example.com/book/ft-lauderdale', info_url: 'https://en.wikipedia.org/wiki/Fort_Lauderdale,_Florida' }
+            ];
+
+            const q = (query || '').toLowerCase();
+            const filtered = affordable.filter(item =>
+                item.title.toLowerCase().includes(q) ||
+                item.highlights.join(' ').toLowerCase().includes(q) ||
+                item.country.toLowerCase().includes(q) ||
+                q === ''
+            );
+
+            if (budget === 'affordable') {
+                filtered.sort((a, b) => (a.price_estimate || 9999) - (b.price_estimate || 9999));
+            }
+
+            return filtered.slice(0, 6);
+        }
     </script>
 
+    <!-- Forum client debug script: supports window.API_BASE and surfaces server/GitHub errors. -->
     <script>
-    // Forum client debug script: supports window.API_BASE and surfaces server/GitHub errors.
     (function () {
       const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : (location.protocol === 'file:' ? 'http://localhost:3000' : '');
       const forumForm = document.getElementById('forum-form');
