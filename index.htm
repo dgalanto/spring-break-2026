@@ -474,6 +474,41 @@
             color: #666;
         }
 
+        /* Collapsible forum styles */
+        .forum-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .forum-toggle {
+            padding: 6px 12px;
+            background: #f0f6f7;
+            border: 1px solid #cfeef6;
+            border-radius: 8px;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .forum-toggle:hover {
+            background: #e6f7f9;
+        }
+
+        .forum-content {
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            max-height: 2000px;
+            opacity: 1;
+        }
+
+        .forum-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+        }
+
         .api-note {
             margin-top: 8px;
             font-size: 0.9em;
@@ -720,18 +755,23 @@
 
         <!-- Optional simple forum area (local-first) -->
         <div class="forum">
-            <h2>💬 Forum</h2>
-            <div class="forum-note">Share ideas — posts are saved locally and will attempt to sync if a server endpoint exists.</div>
-            <form id="forum-form" class="forum-form" aria-label="Forum form">
-                <input id="forum-name" type="text" placeholder="Your name" />
-                <textarea id="forum-comment" placeholder="Share a thought..."></textarea>
-                <div class="forum-actions">
-                    <button id="forum-submit" class="small-btn" type="submit">Post</button>
-                    <button id="clear-comments" type="button" class="small-btn">Clear</button>
-                </div>
-            </form>
-            <div id="forum-sync-note" class="forum-note"></div>
-            <div id="comments-list" class="comments-list"></div>
+            <div class="forum-header" id="forum-header" aria-controls="forum-content" aria-expanded="true">
+                <h2>💬 Forum</h2>
+                <button id="forum-toggle-btn" class="forum-toggle" aria-label="Toggle forum visibility">Hide</button>
+            </div>
+            <div id="forum-content" class="forum-content">
+                <div class="forum-note">Share ideas — posts are saved locally and will attempt to sync if a server endpoint exists.</div>
+                <form id="forum-form" class="forum-form" aria-label="Forum form">
+                    <input id="forum-name" type="text" placeholder="Your name" />
+                    <textarea id="forum-comment" placeholder="Share a thought..."></textarea>
+                    <div class="forum-actions">
+                        <button id="forum-submit" class="small-btn" type="submit">Post</button>
+                        <button id="clear-comments" type="button" class="small-btn">Clear</button>
+                    </div>
+                </form>
+                <div id="forum-sync-note" class="forum-note"></div>
+                <div id="comments-list" class="comments-list"></div>
+            </div>
         </div>
     </div>
 
@@ -863,4 +903,64 @@
 
         function mockSearch(query, budget) {
             const affordable = [
-                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_ur[...]
+                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_url: 'https://www.google.com/search?q=Myrtle+Beach+travel' },
+                { title: 'Galveston, Texas', country: 'USA', price_estimate: 450, duration: '3-4 days', highlights: ['Gulf beaches', 'historic district', 'family attractions'], booking_url: 'https://www.google.com/search?q=Galveston+travel' },
+                { title: 'Nashville, Tennessee', country: 'USA', price_estimate: 550, duration: '3 days', highlights: ['music scene', 'southern food', 'cultural sites'], booking_url: 'https://www.google.com/search?q=Nashville+travel' }
+            ];
+            const moderate = [
+                { title: 'Cancún, Mexico', country: 'Mexico', price_estimate: 850, duration: '5 days', highlights: ['beaches', 'resorts', 'Mayan ruins'], booking_url: 'https://www.google.com/search?q=Cancun+travel' },
+                { title: 'San Diego, California', country: 'USA', price_estimate: 900, duration: '4 days', highlights: ['beaches', 'zoo', 'family-friendly'], booking_url: 'https://www.google.com/search?q=San+Diego+travel' }
+            ];
+            const luxury = [
+                { title: 'Hawaii', country: 'USA', price_estimate: 1800, duration: '7 days', highlights: ['tropical paradise', 'beaches', 'volcanic landscapes'], booking_url: 'https://www.google.com/search?q=Hawaii+travel' },
+                { title: 'Caribbean Cruise', country: 'Various', price_estimate: 2200, duration: '7 days', highlights: ['all-inclusive', 'multiple destinations', 'luxury amenities'], booking_url: 'https://www.google.com/search?q=Caribbean+cruise' }
+            ];
+
+            if (budget === 'luxury') return luxury;
+            if (budget === 'moderate') return moderate;
+            return affordable;
+        }
+
+        // Forum toggle functionality with localStorage persistence
+        (function() {
+            const STORAGE_KEY = 'sb_forum_collapsed_v1';
+            const forumHeader = document.getElementById('forum-header');
+            const forumContent = document.getElementById('forum-content');
+            const toggleBtn = document.getElementById('forum-toggle-btn');
+
+            // Load saved state
+            const isCollapsed = localStorage.getItem(STORAGE_KEY) === 'true';
+            
+            function updateState(collapsed) {
+                if (collapsed) {
+                    forumContent.classList.add('collapsed');
+                    toggleBtn.textContent = 'Show';
+                    forumHeader.setAttribute('aria-expanded', 'false');
+                } else {
+                    forumContent.classList.remove('collapsed');
+                    toggleBtn.textContent = 'Hide';
+                    forumHeader.setAttribute('aria-expanded', 'true');
+                }
+                localStorage.setItem(STORAGE_KEY, collapsed.toString());
+            }
+
+            function toggle() {
+                const isCurrentlyCollapsed = forumContent.classList.contains('collapsed');
+                updateState(!isCurrentlyCollapsed);
+            }
+
+            // Initialize state
+            updateState(isCollapsed);
+
+            // Button click handler
+            toggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggle();
+            });
+
+            // Double-click on header
+            forumHeader.addEventListener('dblclick', toggle);
+        })();
+    </script>
+</body>
+</html>
