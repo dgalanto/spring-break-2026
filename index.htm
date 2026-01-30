@@ -737,7 +737,7 @@
 
     <!-- AI search script (client-side) -->
     <script>
-        // Front-end: AI search with server proxy fallback to Google + fixed mock fallback
+        // Front-end: AI search with server proxy fallback to Google (no local mock results)
         const form = document.getElementById('ai-search-form');
         const input = document.getElementById('ai-search-input');
         const budgetSelect = document.getElementById('ai-budget');
@@ -750,7 +750,15 @@
             const budget = budgetSelect.value || 'affordable';
             resultsEl.innerHTML = '<div class="loading">Searching for travel options... ✈️</div>';
 
+            // Open a fallback window synchronously so popup blockers won't block it.
+            // We'll either close it (if proxy returns results) or navigate it to Google (if proxy fails).
+            const googleQuery = `${query} ${budget === 'affordable' ? 'budget' : budget}`;
+            let fallbackWin = null;
             try {
+                // open an initially-blank window in direct response to the submit event
+                // This call must happen synchronously after the user gesture to avoid popup blockers.
+                fallbackWin = window.open('', '_blank');
+
                 const resp = await fetch('/api/ai-travel-search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -758,25 +766,35 @@
                 });
 
                 if (!resp.ok) {
-                    // if proxy responds with non-OK, throw to trigger fallback
                     const body = await resp.text().catch(() => '');
                     throw new Error(`Proxy error: ${resp.status} ${body}`);
                 }
 
                 const data = await resp.json();
                 const results = Array.isArray(data) ? data : (Array.isArray(data.results) ? data.results : []);
+
+                // proxy worked — close the fallback tab if it exists
+                if (fallbackWin && !fallbackWin.closed) {
+                    try { fallbackWin.close(); } catch (err) { /* ignore */ }
+                }
+
                 renderResults(results);
                 return;
             } catch (err) {
                 console.warn('Search proxy failed:', err);
-                // Fallback behavior:
-                // 1) Open a Google search in a new tab so the user sees live web results
-                const googleQuery = `${query} ${budget === 'affordable' ? 'budget' : budget}`;
-                try { window.open('https://www.google.com/search?q=' + encodeURIComponent(googleQuery), '_blank'); } catch (e) { /* ignore */ }
 
-                // 2) Render a local mock set so the page still shows suggestions
-                const mock = mockSearch(query, budget);
-                renderResults(mock);
+                // Use the previously-opened window to navigate to Google so it's not blocked.
+                try {
+                    if (fallbackWin && !fallbackWin.closed) {
+                        fallbackWin.location.href = 'https://www.google.com/search?q=' + encodeURIComponent(googleQuery);
+                    } else {
+                        // if the fallback window was closed by the user or didn't open, open one now (may be blocked)
+                        window.open('https://www.google.com/search?q=' + encodeURIComponent(googleQuery), '_blank');
+                    }
+                } catch (e) { /* ignore */ }
+
+                // No local mock results by design — inform the user.
+                resultsEl.innerHTML = '<div class="loading">The search was opened in Google (new tab). If nothing opened, please allow popups or try again.</div>';
             }
         });
 
@@ -861,6 +879,109 @@
             return tmp.innerHTML;
         }
 
-        function mockSearch(query, budget) {
-            const affordable = [
-                { title: 'Myrtle Beach, South Carolina', country: 'USA', price_estimate: 320, duration: '4 days', highlights: ['beach', 'family-friendly', 'budget hotels', 'short flights'], booking_ur[...]
+        // ---- Forum (local-first) ----
+        const forumForm = document.getElementById('forum-form');
+        const forumName = document.getElementById('forum-name');
+        const forumComment = document.getElementById('forum-comment');
+        const commentsList = document.getElementById('comments-list');
+        const forumSyncNote = document.getElementById('forum-sync-note');
+        const clearBtn = document.getElementById('clear-comments');
+
+        function loadComments() {
+            try {
+                const raw = localStorage.getItem('sb_comments_v1');
+                return raw ? JSON.parse(raw) : [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function saveComments(comments) {
+            try {
+                localStorage.setItem('sb_comments_v1', JSON.stringify(comments));
+            } catch (e) {
+                // ignore quota errors
+            }
+        }
+
+        function renderComments() {
+            const comments = loadComments();
+            commentsList.innerHTML = '';
+            if (!comments.length) {
+                commentsList.innerHTML = '<div class="forum-note">No posts yet — be the first!</div>';
+                return;
+            }
+            comments.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'comment-item';
+
+                const meta = document.createElement('div');
+                meta.className = 'comment-meta';
+                const when = new Date(c.ts).toLocaleString();
+                meta.textContent = `${c.name || 'Anonymous'} • ${when}`;
+
+                const text = document.createElement('div');
+                text.className = 'comment-text';
+                text.textContent = c.text;
+
+                item.appendChild(meta);
+                item.appendChild(text);
+                commentsList.appendChild(item);
+            });
+        }
+
+        forumForm.addEventListener('submit', (ev) => {
+            ev.preventDefault();
+            const name = (forumName.value || '').trim();
+            const text = (forumComment.value || '').trim();
+            if (!text) return;
+            const comments = loadComments();
+            const entry = { name: name || 'Anonymous', text, ts: Date.now() };
+            comments.unshift(entry);
+            saveComments(comments);
+            renderComments();
+            forumName.value = '';
+            forumComment.value = '';
+
+            // Try to sync to an API endpoint if available (non-blocking)
+            if (navigator.onLine) {
+                try {
+                    fetch('/api/comments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(entry)
+                    }).then(resp => {
+                        if (resp && resp.ok) {
+                            forumSyncNote.textContent = 'Comment posted and synced.';
+                            setTimeout(() => forumSyncNote.textContent = '', 3000);
+                        } else {
+                            forumSyncNote.textContent = 'Comment saved locally (sync failed).';
+                            setTimeout(() => forumSyncNote.textContent = '', 3000);
+                        }
+                    }).catch(() => {
+                        forumSyncNote.textContent = 'Comment saved locally (offline or network error).';
+                        setTimeout(() => forumSyncNote.textContent = '', 3000);
+                    });
+                } catch (e) {
+                    // ignore
+                }
+            } else {
+                forumSyncNote.textContent = 'You are offline — comment saved locally.';
+                setTimeout(() => forumSyncNote.textContent = '', 3000);
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            if (!confirm('Clear all local posts? This cannot be undone.')) return;
+            localStorage.removeItem('sb_comments_v1');
+            renderComments();
+            forumSyncNote.textContent = 'Local posts cleared.';
+            setTimeout(() => forumSyncNote.textContent = '', 3000);
+        });
+
+        // initial render
+        renderComments();
+
+    </script>
+</body>
+</html>
